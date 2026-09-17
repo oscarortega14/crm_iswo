@@ -32,6 +32,11 @@ shared: &shared
     queue: low
     schedule: at 7am every day
 
+  whatsapp_campaign_batch_job:
+    class: WhatsappCampaignBatchJob
+    queue: integrations
+    schedule: every 5 minutes
+
 development:
   <<: *shared
 

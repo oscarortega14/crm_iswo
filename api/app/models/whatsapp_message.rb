@@ -20,6 +20,7 @@ class WhatsappMessage < ApplicationRecord
   belongs_to :tenant
   belongs_to :opportunity, optional: true
   belongs_to :contact, optional: true
+  has_one :whatsapp_campaign_recipient, inverse_of: :whatsapp_message
 
   validates :direction,   inclusion: { in: DIRECTIONS }
   validates :provider,    inclusion: { in: PROVIDERS }
@@ -32,4 +33,11 @@ class WhatsappMessage < ApplicationRecord
   scope :inbound,  -> { direction_in }
   scope :outbound, -> { direction_out }
   scope :recent,   -> { order(created_at: :desc) }
+
+  # Mensajes disparados por una WhatsappCampaign van por el endpoint
+  # /marketing_messages (MM Lite) en vez de /messages — ver
+  # WhatsApp::Adapters::Cloud#deliver.
+  def marketing?
+    whatsapp_campaign_recipient.present?
+  end
 end

@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConversationList, type InboxScope } from '@/components/inbox/ConversationList'
 import { WhatsAppThread, type ThreadMessage } from '@/components/opportunities/WhatsAppThread'
 import { WhatsappTemplatesPanel } from '@/components/whatsapp/WhatsappTemplatesPanel'
+import { WhatsappCampaignsPanel } from '@/components/whatsapp/WhatsappCampaignsPanel'
 import { useAuthStore } from '@/stores/auth'
 import { getAuthQueryScope, queryKeys } from '@/lib/queryClient'
 import api from '@/lib/api'
@@ -17,7 +18,7 @@ import { fetchConversations, markConversationRead } from '@/lib/whatsappInboxApi
 
 const whatsappSearchSchema = z.object({
   contact: z.string().optional(),
-  tab: z.enum(['inbox', 'templates']).optional(),
+  tab: z.enum(['inbox', 'templates', 'campaigns']).optional(),
 })
 
 export const Route = createFileRoute('/_app/whatsapp')({
@@ -57,7 +58,8 @@ function WhatsappPage() {
   const canSend = role !== 'viewer'
   const canManageTemplates = role === 'admin' || role === 'manager'
 
-  const activeTab = search.tab === 'templates' && canManageTemplates ? 'templates' : 'inbox'
+  const activeTab =
+    (search.tab === 'templates' || search.tab === 'campaigns') && canManageTemplates ? search.tab : 'inbox'
 
   const [scope, setScope] = useState<InboxScope>(canSeeAll ? 'all' : 'mine')
   const [searchText, setSearchText] = useState('')
@@ -117,12 +119,15 @@ function WhatsappPage() {
 
       <Tabs
         value={activeTab}
-        onValueChange={(value) => void navigate({ search: { ...search, tab: value as 'inbox' | 'templates' } })}
+        onValueChange={(value) =>
+          void navigate({ search: { ...search, tab: value as 'inbox' | 'templates' | 'campaigns' } })
+        }
         className="flex min-h-0 flex-1 flex-col"
       >
         <TabsList className={canManageTemplates ? '' : 'hidden'}>
           <TabsTrigger value="inbox">Bandeja de entrada</TabsTrigger>
           {canManageTemplates && <TabsTrigger value="templates">Plantillas</TabsTrigger>}
+          {canManageTemplates && <TabsTrigger value="campaigns">Campañas</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="inbox" className="flex min-h-0 flex-1 flex-col">
@@ -162,6 +167,12 @@ function WhatsappPage() {
         {canManageTemplates && (
           <TabsContent value="templates" className="overflow-y-auto">
             <WhatsappTemplatesPanel />
+          </TabsContent>
+        )}
+
+        {canManageTemplates && (
+          <TabsContent value="campaigns" className="overflow-y-auto">
+            <WhatsappCampaignsPanel />
           </TabsContent>
         )}
       </Tabs>

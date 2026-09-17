@@ -48,7 +48,8 @@ module Api
       end
 
       def permitted
-        params.require(:whatsapp_template).permit(:name, :meta_template_name, :language, :active, variable_labels: [])
+        params.require(:whatsapp_template)
+              .permit(:name, :meta_template_name, :language, :active, variable_labels: [], variable_names: [])
       end
     end
   end

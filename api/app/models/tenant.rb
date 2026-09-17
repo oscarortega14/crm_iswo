@@ -25,6 +25,7 @@ class Tenant < ApplicationRecord
   has_many :ad_integrations,        dependent: :destroy
   has_many :whatsapp_messages,      dependent: :destroy
   has_many :whatsapp_templates,     dependent: :destroy
+  has_many :whatsapp_campaigns,     dependent: :destroy
   has_many :exports,                dependent: :destroy
   has_many :audit_events,           dependent: :nullify
   has_one  :bant_criterion,         dependent: :destroy
@@ -121,6 +122,16 @@ class Tenant < ApplicationRecord
     else
       whatsapp_outbound_from_number
     end
+  end
+
+  # Usado por WhatsappCampaign#launch! para fallar rápido con un mensaje claro
+  # en vez de crear cientos de recipients que van a fallar uno por uno.
+  def whatsapp_cloud_configured?
+    return true if ENV["WHATSAPP_CLOUD_ACCESS_TOKEN"].present? && ENV["WHATSAPP_CLOUD_PHONE_NUMBER_ID"].present?
+    return true if settings.dig("whatsapp", "cloud_access_token").present? &&
+                   settings.dig("whatsapp", "cloud_phone_number_id").present?
+
+    ad_integration_has_credentials?(preferred_whatsapp_cloud_integration)
   end
 
   private
