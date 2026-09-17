@@ -81,6 +81,7 @@ Rails.application.routes.draw do
           get    "export.xlsx", action: :export_download, defaults: { file_format: "xlsx" }
           post   :export                # encola ExportGenerationJob
           delete :bulk_destroy          # { ids: [...] }
+          post   :backfill_whatsapp_opt_in # ?dry_run=true — opt-in a quien ya escribió
         end
         member do
           post :claim                   # "Tomar lead" — inbox WhatsApp sin asignar

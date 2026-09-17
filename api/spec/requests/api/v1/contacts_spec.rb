@@ -371,4 +371,42 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  describe "POST /api/v1/contacts/backfill_whatsapp_opt_in" do
+    let(:admin) { create(:user, :admin, tenant: tenant) }
+
+    it "dry_run cuenta sin persistir" do
+      wrote_first = create(:contact, tenant: tenant)
+      create(:whatsapp_message, :inbound, :openwa, tenant: tenant, contact: wrote_first)
+      # El create dispara el opt-in automático; lo revertimos para simular
+      # contactos que escribieron ANTES de que existiera ese callback.
+      wrote_first.update_column(:whatsapp_opt_in_at, nil)
+
+      post "/api/v1/contacts/backfill_whatsapp_opt_in?dry_run=true", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "count")).to eq(1)
+      expect(wrote_first.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "marca opt-in a quien ya escribió y no toca a quien nunca escribió" do
+      wrote = create(:contact, tenant: tenant)
+      create(:whatsapp_message, :inbound, :openwa, tenant: tenant, contact: wrote)
+      wrote.update_column(:whatsapp_opt_in_at, nil)
+      never_wrote = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/backfill_whatsapp_opt_in", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "count")).to eq(1)
+      expect(wrote.reload.whatsapp_opted_in?).to be(true)
+      expect(wrote.whatsapp_opt_in_source).to eq("reply_stop_in")
+      expect(never_wrote.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "manager no puede (403, solo admin)" do
+      post "/api/v1/contacts/backfill_whatsapp_opt_in", headers: auth_headers(manager)
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
 end

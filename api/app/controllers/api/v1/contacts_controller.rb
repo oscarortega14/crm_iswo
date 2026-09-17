@@ -127,6 +127,27 @@ module Api
         render json: { data: { deleted: deleted } }, status: :ok
       end
 
+      # POST /api/v1/contacts/backfill_whatsapp_opt_in?dry_run=true
+      # Marca opt-in a contactos que ya escribieron por WhatsApp antes de que
+      # existiera el gate de opt-in (WhatsappMessage#mark_contact_whatsapp_opt_in
+      # ya lo hace automático para mensajes nuevos desde ahora en adelante).
+      # dry_run=true solo cuenta, no persiste — para previsualizar el impacto.
+      def backfill_whatsapp_opt_in
+        authorize Contact, :destroy?
+
+        scope = policy_scope(Contact).kept
+                                      .where(whatsapp_opt_in_at: nil)
+                                      .where(id: current_tenant.whatsapp_messages.inbound.select(:contact_id))
+
+        count = scope.count
+        unless ActiveModel::Type::Boolean.new.cast(params[:dry_run])
+          scope.find_each { |c| c.mark_whatsapp_opt_in!(source: "reply_stop_in") }
+        end
+
+        render json: { data: { count: count, dry_run: ActiveModel::Type::Boolean.new.cast(params[:dry_run]) } },
+               status: :ok
+      end
+
       # GET /api/v1/contacts/check_duplicates?phone=...&email=...&full_name=...
       # Llamado desde el form del SPA mientras el consultor escribe.
       # Devuelve { data: { exists: bool, opportunity?: { id, contact_name, owner_name, created_at } } }
