@@ -113,6 +113,15 @@ RSpec.describe ContactPolicy do
     end
   end
 
+  describe "bulk_whatsapp_opt_in?" do
+    it "admin y manager pueden, consultant y viewer no" do
+      expect(described_class.new(admin,      Contact.new).bulk_whatsapp_opt_in?).to be(true)
+      expect(described_class.new(manager,    Contact.new).bulk_whatsapp_opt_in?).to be(true)
+      expect(described_class.new(consultant, Contact.new).bulk_whatsapp_opt_in?).to be(false)
+      expect(described_class.new(viewer,     Contact.new).bulk_whatsapp_opt_in?).to be(false)
+    end
+  end
+
   describe "check_duplicates?" do
     it "admin, manager, consultant" do
       expect(described_class.new(admin,      Contact.new).check_duplicates?).to be(true)

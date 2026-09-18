@@ -82,6 +82,7 @@ Rails.application.routes.draw do
           post   :export                # encola ExportGenerationJob
           delete :bulk_destroy          # { ids: [...] }
           post   :backfill_whatsapp_opt_in # ?dry_run=true — opt-in a quien ya escribió
+          post   :bulk_whatsapp_opt_in     # { ids: [...] } — opt-in manual (admin/manager)
         end
         member do
           post :claim                   # "Tomar lead" — inbox WhatsApp sin asignar

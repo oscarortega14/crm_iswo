@@ -45,6 +45,12 @@ class ContactSerializer < ApplicationSerializer
     c.respond_to?(:last_contacted_at) ? c.last_contacted_at : nil
   end
 
+  attribute :whatsapp_opted_in do |c|
+    c.whatsapp_opted_in?
+  end
+
+  attribute :whatsapp_opt_in_source, &:whatsapp_opt_in_source
+
   attribute :full_name do |c|
     [c.first_name, c.last_name].compact.join(" ").strip.presence || c.company.presence || "—"
   end

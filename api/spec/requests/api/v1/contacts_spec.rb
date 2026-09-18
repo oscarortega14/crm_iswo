@@ -409,4 +409,67 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  describe "POST /api/v1/contacts/bulk_whatsapp_opt_in" do
+    let(:admin) { create(:user, :admin, tenant: tenant) }
+
+    it "admin marca opt-in manual a los ids dados" do
+      c1 = create(:contact, tenant: tenant)
+      c2 = create(:contact, tenant: tenant)
+      untouched = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id, c2.id] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "marked")).to eq(2)
+      expect(c1.reload.whatsapp_opted_in?).to be(true)
+      expect(c1.whatsapp_opt_in_source).to eq("manual")
+      expect(c2.reload.whatsapp_opted_in?).to be(true)
+      expect(untouched.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "no recuenta ni sobreescribe contactos ya opt-in" do
+      already = create(:contact, tenant: tenant)
+      already.mark_whatsapp_opt_in!(source: "reply_stop_in")
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [already.id] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "marked")).to eq(0)
+      expect(already.reload.whatsapp_opt_in_source).to eq("reply_stop_in")
+    end
+
+    it "manager sí puede (a diferencia del backfill, que es solo admin)" do
+      c1 = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(manager)
+
+      expect(response).to have_http_status(:ok)
+      expect(c1.reload.whatsapp_opted_in?).to be(true)
+    end
+
+    it "consultant no puede (403)" do
+      c1 = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(consultant)
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "400 si no hay ids" do
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:bad_request)
+    end
+  end
 end
