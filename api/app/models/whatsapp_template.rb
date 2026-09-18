@@ -22,4 +22,10 @@ class WhatsappTemplate < ApplicationRecord
   def variable_count
     Array(variable_labels).size
   end
+
+  # true si Meta exige parámetros con nombre (`{{primer_nombre}}`) para esta
+  # plantilla en vez del formato posicional clásico (`{{1}}`).
+  def named_parameters?
+    Array(variable_names).any?(&:present?)
+  end
 end

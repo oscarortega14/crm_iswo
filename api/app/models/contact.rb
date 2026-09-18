@@ -60,6 +60,7 @@ class Contact < ApplicationRecord
   has_many :opportunities, dependent: :destroy
   has_many :landing_form_submissions, dependent: :nullify
   has_many :whatsapp_messages, dependent: :nullify
+  has_many :whatsapp_campaign_recipients, dependent: :destroy
 
   # ---- Validaciones ---------------------------------------------------------
   validates :kind, inclusion: { in: KINDS }
@@ -80,6 +81,7 @@ class Contact < ApplicationRecord
       OR (phone_normalized IS NOT NULL AND phone_normalized <> '')
     SQL
   }
+  scope :opted_in_for_whatsapp, -> { where.not(whatsapp_opt_in_at: nil) }
 
   # ---- Helpers --------------------------------------------------------------
   def display_name
@@ -116,6 +118,20 @@ class Contact < ApplicationRecord
 
   def phone_display_value
     phone_e164_safe.presence || phone_normalized_legacy.presence
+  end
+
+  # Gate de campañas masivas — nil hasta que alguien lo marque explícito.
+  # NUNCA asumir opt-in por default: es la defensa contra baneo de Meta.
+  def whatsapp_opted_in?
+    whatsapp_opt_in_at.present?
+  end
+
+  def mark_whatsapp_opt_in!(source:)
+    update!(whatsapp_opt_in_at: Time.current, whatsapp_opt_in_source: source)
+  end
+
+  def revoke_whatsapp_opt_in!
+    update!(whatsapp_opt_in_at: nil)
   end
 
   private

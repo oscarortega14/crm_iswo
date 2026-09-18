@@ -81,6 +81,8 @@ Rails.application.routes.draw do
           get    "export.xlsx", action: :export_download, defaults: { file_format: "xlsx" }
           post   :export                # encola ExportGenerationJob
           delete :bulk_destroy          # { ids: [...] }
+          post   :backfill_whatsapp_opt_in # ?dry_run=true — opt-in a quien ya escribió
+          post   :bulk_whatsapp_opt_in     # { ids: [...] } — opt-in manual (admin/manager)
         end
         member do
           post :claim                   # "Tomar lead" — inbox WhatsApp sin asignar
@@ -191,6 +193,12 @@ Rails.application.routes.draw do
       resources :whatsapp_messages, only: %i[index show]
       resources :whatsapp_templates
 
+      # ---- Campañas WhatsApp (mensajería masiva) ------------------------------
+      resources :whatsapp_campaigns, only: %i[index show create update] do
+        collection { get :audience_preview }
+        member { post :launch; post :pause; post :resume; post :cancel }
+      end
+
       # ---- Bandeja de entrada WhatsApp (inbox) --------------------------------
       resources :whatsapp_conversations, only: [:index], param: :contact_id do
         collection { get :stats }
@@ -200,15 +208,6 @@ Rails.application.routes.draw do
       # ---- Exports ----------------------------------------------------------
       resources :exports, only: %i[index show create] do
         member { get :download }
-      end
-
-      # ---- Biblioteca de valor ("Dar Valor Primero") -------------------------
-      resources :assets, only: %i[index show create update destroy]
-
-      # ---- Campañas WhatsApp (mensajería masiva) ------------------------------
-      resources :whatsapp_campaigns, only: %i[index show create update] do
-        collection { get :audience_preview }
-        member { post :launch; post :pause; post :resume; post :cancel }
       end
 
       # ========================================================================

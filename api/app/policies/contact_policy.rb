@@ -17,6 +17,9 @@ class ContactPolicy < ApplicationPolicy
   def update?           = admin? || manager? || contact_owner?
   def destroy?          = admin?
   def bulk_destroy?     = admin?
+  # Marcar opt-in manual de WhatsApp (consentimiento verificado fuera del sistema,
+  # ej. cliente existente, contacto que dio permiso presencial/telefónico).
+  def bulk_whatsapp_opt_in? = manager_or_admin?
   def check_duplicates? = admin? || manager? || consultant?
   def export?           = manager_or_admin?
   # Reclamar un contacto sin dueño (botón "Tomar lead" en el inbox).

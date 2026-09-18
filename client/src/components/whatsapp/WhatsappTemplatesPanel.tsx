@@ -38,7 +38,13 @@ import {
 import { queryKeys } from '@/lib/queryClient'
 import { useAuthStore } from '@/stores/auth'
 
-const emptyForm = { name: '', metaTemplateName: '', language: 'es_CO', variableLabels: [] as string[] }
+const emptyForm = {
+  name: '',
+  metaTemplateName: '',
+  language: 'es_CO',
+  variableLabels: [] as string[],
+  variableNames: [] as string[],
+}
 
 /**
  * Gestión del catálogo de plantillas de WhatsApp aprobadas por Meta. Solo
@@ -62,11 +68,17 @@ export function WhatsappTemplatesPanel() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // labels y names se mantienen alineados por índice (fila a fila en el
+      // editor); se filtran juntos por si alguna fila quedó con label vacío.
+      const rows = form.variableLabels
+        .map((label, i) => ({ label: label.trim(), name: (form.variableNames[i] ?? '').trim() }))
+        .filter((row) => row.label)
       const body = {
         name: form.name.trim(),
         meta_template_name: form.metaTemplateName.trim(),
         language: form.language.trim(),
-        variable_labels: form.variableLabels.map((l) => l.trim()).filter(Boolean),
+        variable_labels: rows.map((r) => r.label),
+        variable_names: rows.map((r) => r.name),
       }
       if (editing) {
         await updateWhatsappTemplate(editing.id, body)
@@ -111,6 +123,7 @@ export function WhatsappTemplatesPanel() {
       metaTemplateName: tpl.metaTemplateName,
       language: tpl.language,
       variableLabels: [...tpl.variableLabels],
+      variableNames: [...tpl.variableNames],
     })
     setDialogOpen(true)
   }
@@ -121,11 +134,18 @@ export function WhatsappTemplatesPanel() {
     setForm(emptyForm)
   }
 
-  const addVariable = () => setForm((f) => ({ ...f, variableLabels: [...f.variableLabels, ''] }))
+  const addVariable = () =>
+    setForm((f) => ({ ...f, variableLabels: [...f.variableLabels, ''], variableNames: [...f.variableNames, ''] }))
   const removeVariable = (i: number) =>
-    setForm((f) => ({ ...f, variableLabels: f.variableLabels.filter((_, idx) => idx !== i) }))
+    setForm((f) => ({
+      ...f,
+      variableLabels: f.variableLabels.filter((_, idx) => idx !== i),
+      variableNames: f.variableNames.filter((_, idx) => idx !== i),
+    }))
   const setVariable = (i: number, value: string) =>
     setForm((f) => ({ ...f, variableLabels: f.variableLabels.map((v, idx) => (idx === i ? value : v)) }))
+  const setVariableName = (i: number, value: string) =>
+    setForm((f) => ({ ...f, variableNames: f.variableNames.map((v, idx) => (idx === i ? value : v)) }))
 
   const canSave = form.name.trim() && form.metaTemplateName.trim() && form.language.trim()
 
@@ -269,7 +289,7 @@ export function WhatsappTemplatesPanel() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Variables ({'{{1}}'}, {'{{2}}'}...)</Label>
+                <Label>Variables</Label>
                 <Button type="button" variant="outline" size="sm" onClick={addVariable}>
                   <Plus className="mr-1 h-3.5 w-3.5" />
                   Agregar
@@ -279,6 +299,11 @@ export function WhatsappTemplatesPanel() {
                 <p className="text-xs text-muted-foreground">Sin variables — la plantilla es texto fijo.</p>
               ) : (
                 <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Nombre para mostrar al consultor, y el nombre exacto de la variable en Meta si la
+                    plantilla usa el formato nuevo ({'{{primer_nombre}}'}) — déjalo vacío si tu plantilla
+                    usa el formato clásico posicional ({'{{1}}'}, {'{{2}}'}...).
+                  </p>
                   {form.variableLabels.map((label, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <span className="w-6 shrink-0 text-xs text-muted-foreground">{`{{${i + 1}}}`}</span>
@@ -286,6 +311,11 @@ export function WhatsappTemplatesPanel() {
                         value={label}
                         onChange={(e) => setVariable(i, e.target.value)}
                         placeholder="Ej: Nombre del lead"
+                      />
+                      <Input
+                        value={form.variableNames[i] ?? ''}
+                        onChange={(e) => setVariableName(i, e.target.value)}
+                        placeholder="Ej: primer_nombre (opcional)"
                       />
                       <Button
                         type="button"

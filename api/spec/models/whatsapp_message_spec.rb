@@ -78,4 +78,32 @@ RSpec.describe WhatsappMessage, type: :model do
       expect(WhatsappMessage.recent.first.created_at).to be >= WhatsappMessage.recent.last.created_at
     end
   end
+
+  describe "opt-in automático al recibir un mensaje entrante" do
+    it "marca whatsapp_opt_in_at con source reply_stop_in si el contacto no tenía opt-in" do
+      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+
+      expect(contact.reload.whatsapp_opted_in?).to be(true)
+      expect(contact.whatsapp_opt_in_source).to eq("reply_stop_in")
+    end
+
+    it "no pisa un opt-in ya existente" do
+      contact.mark_whatsapp_opt_in!(source: "manual")
+      original_at = contact.whatsapp_opt_in_at
+
+      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+
+      expect(contact.reload.whatsapp_opt_in_source).to eq("manual")
+      expect(contact.whatsapp_opt_in_at).to eq(original_at)
+    end
+
+    it "no marca opt-in para mensajes salientes" do
+      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact)
+      expect(contact.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "no falla si el mensaje no tiene contacto asociado" do
+      expect { create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: nil) }.not_to raise_error
+    end
+  end
 end

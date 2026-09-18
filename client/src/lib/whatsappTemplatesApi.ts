@@ -7,6 +7,8 @@ export interface WhatsappTemplate {
   metaTemplateName: string
   language: string
   variableLabels: string[]
+  /** Nombre exacto de cada variable en Meta (formato nuevo: {{primer_nombre}}). Vacío = plantilla posicional clásica ({{1}}). */
+  variableNames: string[]
   active: boolean
 }
 
@@ -14,6 +16,7 @@ export function mapWhatsappTemplate(resource: JsonApiResource): WhatsappTemplate
   if (!resource.id) return null
   const a = resource.attributes ?? {}
   const labels = Array.isArray(a.variable_labels) ? a.variable_labels : []
+  const names = Array.isArray(a.variable_names) ? a.variable_names : []
 
   return {
     id:               String(resource.id),
@@ -21,6 +24,7 @@ export function mapWhatsappTemplate(resource: JsonApiResource): WhatsappTemplate
     metaTemplateName: String(a.meta_template_name ?? ''),
     language:         String(a.language ?? ''),
     variableLabels:   labels.map((l) => String(l)),
+    variableNames:    names.map((n) => String(n)),
     active:           Boolean(a.active ?? true),
   }
 }
@@ -37,6 +41,7 @@ export type WhatsappTemplateInput = {
   meta_template_name: string
   language: string
   variable_labels: string[]
+  variable_names: string[]
   active?: boolean
 }
 

@@ -20,6 +20,7 @@ class WhatsappMessage < ApplicationRecord
   belongs_to :tenant
   belongs_to :opportunity, optional: true
   belongs_to :contact, optional: true
+  has_one :whatsapp_campaign_recipient, inverse_of: :whatsapp_message
 
   validates :direction,   inclusion: { in: DIRECTIONS }
   validates :provider,    inclusion: { in: PROVIDERS }
@@ -29,7 +30,26 @@ class WhatsappMessage < ApplicationRecord
             uniqueness: { scope: :provider, allow_nil: true }
   validates :template_name, :template_language, presence: true, if: :message_type_template?
 
+  after_create :mark_contact_whatsapp_opt_in, if: :direction_in?
+
   scope :inbound,  -> { direction_in }
   scope :outbound, -> { direction_out }
   scope :recent,   -> { order(created_at: :desc) }
+
+  # Mensajes disparados por una WhatsappCampaign van por el endpoint
+  # /marketing_messages (MM Lite) en vez de /messages — ver
+  # WhatsApp::Adapters::Cloud#deliver.
+  def marketing?
+    whatsapp_campaign_recipient.present?
+  end
+
+  private
+
+  # Un mensaje entrante es la señal más fuerte de consentimiento que existe:
+  # el contacto escribió primero. Se interpreta como opt-in para seguir la
+  # conversación (no como opt-in genérico de marketing masivo, pero
+  # WhatsappCampaign trata cualquier opt-in igual — ver RFC).
+  def mark_contact_whatsapp_opt_in
+    contact&.mark_whatsapp_opt_in!(source: "reply_stop_in") unless contact&.whatsapp_opted_in?
+  end
 end
