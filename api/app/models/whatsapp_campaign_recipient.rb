@@ -6,7 +6,7 @@
 class WhatsappCampaignRecipient < ApplicationRecord
   include TenantScoped
 
-  STATUSES = %w[pending sent failed skipped_no_opt_in skipped_no_phone].freeze
+  STATUSES = %w[pending sent failed skipped_no_opt_in skipped_no_phone skipped_missing_variable].freeze
 
   belongs_to :tenant
   belongs_to :whatsapp_campaign

@@ -64,13 +64,25 @@ module WhatsappCampaigns
         return
       end
 
-      send_message!(recipient, contact, to)
+      # Meta rechaza con 131008 ("Required parameter is missing") cualquier
+      # parámetro de texto vacío — p. ej. `contact.company_name` en un lead
+      # sin empresa. Se omite al destinatario en vez de encolar un envío que
+      # va a fallar; el resto de la campaña sigue normal.
+      params = resolve_params(contact, recipient.opportunity)
+      blank_index = params.index(&:blank?)
+      if blank_index
+        recipient.update!(status: "skipped_missing_variable",
+                          skip_reason: "variable {{#{blank_index + 1}}} vacía para este contacto")
+        return
+      end
+
+      send_message!(recipient, contact, to, params)
     rescue StandardError => e
       recipient.update!(status: "failed", skip_reason: e.message.truncate(300))
       @campaign.increment!(:failed_count)
     end
 
-    def send_message!(recipient, contact, to)
+    def send_message!(recipient, contact, to, params)
       tenant   = @campaign.tenant
       provider = WHATSAPP_CLOUD_PROVIDER
       from     = tenant.whatsapp_outbound_from_number_for(provider)
@@ -85,7 +97,7 @@ module WhatsappCampaigns
         message_type:            "template",
         template_name:           @template.meta_template_name,
         template_language:       @template.language,
-        template_params:         resolve_params(contact, recipient.opportunity),
+        template_params:         params,
         template_variable_names: Array(@template.variable_names),
         status:                  "queued"
       )
