@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Play, Pause, X, Users } from 'lucide-react'
+import { Plus, Play, Pause, Pencil, X, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,7 @@ import {
 import {
   fetchWhatsappCampaigns,
   createWhatsappCampaign,
+  updateWhatsappCampaign,
   fetchAudiencePreview,
   launchWhatsappCampaign,
   pauseWhatsappCampaign,
@@ -77,6 +78,14 @@ const FIELD_OPTIONS = [
   { value: 'opportunity.title', label: 'Título de la oportunidad' },
 ]
 
+// Valor centinela del Select: la variable se llena con un texto escrito a
+// mano (p. ej. el nombre de nuestra empresa) en vez de un campo del contacto.
+// El backend (Dispatcher#resolve_field) envía tal cual cualquier valor que
+// no sea un campo conocido.
+const FIXED_TEXT = '__fixed_text__'
+
+const isFieldOption = (value: string) => FIELD_OPTIONS.some((f) => f.value === value)
+
 const TEMPERATURE_OPTIONS = [
   { value: 'cold', label: 'Frío' },
   { value: 'warm', label: 'Tibio' },
@@ -93,9 +102,13 @@ const emptyFilters: WhatsappCampaignAudienceFilters = {}
 export function WhatsappCampaignsPanel() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState('')
   const [fieldMap, setFieldMap] = useState<string[]>([])
+  // Índices de variables en modo "texto fijo" (se distingue de "sin elegir"
+  // aunque el texto todavía esté vacío).
+  const [fixedIdx, setFixedIdx] = useState<Set<number>>(new Set())
   const [filters, setFilters] = useState<WhatsappCampaignAudienceFilters>(emptyFilters)
 
   const { data: campaigns = [], isLoading } = useQuery({
@@ -136,23 +149,42 @@ export function WhatsappCampaignsPanel() {
     enabled: dialogOpen,
   })
 
-  useEffect(() => {
-    if (selectedTemplate) setFieldMap(selectedTemplate.variableLabels.map(() => ''))
-  }, [selectedTemplate])
+  const selectTemplate = (id: string) => {
+    setTemplateId(id)
+    const tpl = templates.find((t) => t.id === id)
+    setFieldMap(tpl ? tpl.variableLabels.map(() => '') : [])
+    setFixedIdx(new Set())
+  }
+
+  const setVariableSource = (i: number, value: string) => {
+    const fixed = value === FIXED_TEXT
+    setFixedIdx((prev) => {
+      const next = new Set(prev)
+      if (fixed) next.add(i)
+      else next.delete(i)
+      return next
+    })
+    setFieldMap((m) => m.map((x, idx) => (idx === i ? (fixed ? '' : value) : x)))
+  }
+
+  const setFixedText = (i: number, text: string) =>
+    setFieldMap((m) => m.map((x, idx) => (idx === i ? text : x)))
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['whatsappCampaigns'] })
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      createWhatsappCampaign({
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const body = {
         name: name.trim(),
         whatsapp_template_id: templateId,
-        variable_field_map: fieldMap,
+        variable_field_map: fieldMap.map((v) => v.trim()),
         audience_filters: filters,
-      }),
+      }
+      return editingId ? updateWhatsappCampaign(editingId, body) : createWhatsappCampaign(body)
+    },
     onSuccess: () => {
       invalidate()
-      toast.success('Campaña creada como borrador')
+      toast.success(editingId ? 'Borrador actualizado' : 'Campaña creada como borrador')
       closeDialog()
     },
     onError: (err) => toast.error(whatsappCampaignErrorMessage(err)),
@@ -195,10 +227,22 @@ export function WhatsappCampaignsPanel() {
   })
 
   const openCreate = () => {
+    setEditingId(null)
     setName('')
     setTemplateId('')
     setFieldMap([])
+    setFixedIdx(new Set())
     setFilters(emptyFilters)
+    setDialogOpen(true)
+  }
+
+  const openEdit = (c: WhatsappCampaign) => {
+    setEditingId(c.id)
+    setName(c.name)
+    setTemplateId(c.whatsappTemplateId)
+    setFieldMap(c.variableFieldMap)
+    setFixedIdx(new Set(c.variableFieldMap.flatMap((v, i) => (v && !isFieldOption(v) ? [i] : []))))
+    setFilters(c.audienceFilters ?? emptyFilters)
     setDialogOpen(true)
   }
 
@@ -251,6 +295,7 @@ export function WhatsappCampaignsPanel() {
             <CampaignRow
               key={c.id}
               campaign={c}
+              onEdit={() => openEdit(c)}
               onLaunch={() => launchMutation.mutate(c.id)}
               onPause={() => pauseMutation.mutate(c.id)}
               onResume={() => resumeMutation.mutate(c.id)}
@@ -269,7 +314,7 @@ export function WhatsappCampaignsPanel() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog() }}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Nueva campaña</DialogTitle>
+            <DialogTitle>{editingId ? 'Editar borrador' : 'Nueva campaña'}</DialogTitle>
             <DialogDescription>
               Queda como borrador — revisa la audiencia y lánzala cuando estés listo.
             </DialogDescription>
@@ -284,7 +329,7 @@ export function WhatsappCampaignsPanel() {
 
             <div className="space-y-2">
               <Label>Plantilla</Label>
-              <Select value={templateId} onValueChange={setTemplateId}>
+              <Select value={templateId} onValueChange={selectTemplate}>
                 <SelectTrigger>
                   <SelectValue placeholder="Elegir plantilla…" />
                 </SelectTrigger>
@@ -300,24 +345,41 @@ export function WhatsappCampaignsPanel() {
               <div className="space-y-2">
                 <Label>Variables de la plantilla</Label>
                 <p className="text-xs text-muted-foreground">
-                  De qué campo del contacto/oportunidad sacar cada variable al enviar.
+                  De qué campo del contacto/oportunidad sacar cada variable al enviar, o un texto fijo
+                  igual para todos (p. ej. el nombre de tu empresa). Si el campo está vacío para un
+                  contacto, ese contacto se omite.
                 </p>
                 {selectedTemplate.variableLabels.map((label, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="w-32 shrink-0 truncate text-xs text-muted-foreground">{label}</span>
-                    <Select
-                      value={fieldMap[i] ?? ''}
-                      onValueChange={(v) => setFieldMap((m) => m.map((x, idx) => (idx === i ? v : x)))}
-                    >
-                      <SelectTrigger className="h-8 flex-1 text-xs">
-                        <SelectValue placeholder="Elegir campo…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FIELD_OPTIONS.map((f) => (
-                          <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div key={i} className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-32 shrink-0 truncate text-xs text-muted-foreground">{`{{${i + 1}}} ${label}`}</span>
+                      <Select
+                        value={fixedIdx.has(i) ? FIXED_TEXT : (fieldMap[i] ?? '')}
+                        onValueChange={(v) => setVariableSource(i, v)}
+                      >
+                        <SelectTrigger className="h-8 flex-1 text-xs">
+                          <SelectValue placeholder="Elegir campo…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FIELD_OPTIONS.map((f) => (
+                            <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                          ))}
+                          <SelectItem value={FIXED_TEXT}>Texto fijo…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {fixedIdx.has(i) && (
+                      <div className="flex items-center gap-2">
+                        <span className="w-32 shrink-0" />
+                        <Input
+                          className="h-8 flex-1 text-xs"
+                          value={fieldMap[i] ?? ''}
+                          onChange={(e) => setFixedText(i, e.target.value)}
+                          placeholder="Ej: SIG ISWO Software + IA"
+                          aria-label={`Texto fijo para ${label}`}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -400,9 +462,9 @@ export function WhatsappCampaignsPanel() {
 
           <DialogFooter>
             <Button variant="outline" onClick={closeDialog}>Cancelar</Button>
-            <Button onClick={() => createMutation.mutate()} disabled={!canSave || createMutation.isPending}>
-              {createMutation.isPending && <Spinner className="mr-2" />}
-              Crear borrador
+            <Button onClick={() => saveMutation.mutate()} disabled={!canSave || saveMutation.isPending}>
+              {saveMutation.isPending && <Spinner className="mr-2" />}
+              {editingId ? 'Guardar cambios' : 'Crear borrador'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -413,6 +475,7 @@ export function WhatsappCampaignsPanel() {
 
 function CampaignRow({
   campaign,
+  onEdit,
   onLaunch,
   onPause,
   onResume,
@@ -420,6 +483,7 @@ function CampaignRow({
   busy,
 }: {
   campaign: WhatsappCampaign
+  onEdit: () => void
   onLaunch: () => void
   onPause: () => void
   onResume: () => void
@@ -438,6 +502,12 @@ function CampaignRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {campaign.status === 'draft' && (
+            <Button size="sm" variant="outline" onClick={onEdit} disabled={busy}>
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+              Editar
+            </Button>
+          )}
           {campaign.status === 'draft' && (
             <Button size="sm" onClick={onLaunch} disabled={busy}>
               <Play className="mr-1.5 h-3.5 w-3.5" />

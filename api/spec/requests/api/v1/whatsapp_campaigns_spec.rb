@@ -74,6 +74,14 @@ RSpec.describe "Api::V1::WhatsappCampaigns", type: :request do
   end
 
   describe "PATCH /api/v1/whatsapp_campaigns/:id" do
+    it "manager edita un borrador y guarda texto fijo en variable_field_map" do
+      patch "/api/v1/whatsapp_campaigns/#{campaign.id}",
+            headers: auth_headers(manager),
+            params: { whatsapp_campaign: { variable_field_map: ["SIG ISWO Software + IA"] } }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(campaign.reload.variable_field_map).to eq(["SIG ISWO Software + IA"])
+    end
+
     it "409 si la campaña ya no está en borrador" do
       campaign.update!(status: "running")
       patch "/api/v1/whatsapp_campaigns/#{campaign.id}",

@@ -78,6 +78,11 @@ export async function createWhatsappCampaign(body: WhatsappCampaignInput): Promi
   await api.post('/whatsapp_campaigns', { whatsapp_campaign: body })
 }
 
+/** Solo borradores — el backend responde 409 `not_draft` si ya se lanzó. */
+export async function updateWhatsappCampaign(id: string, body: WhatsappCampaignInput): Promise<void> {
+  await api.patch(`/whatsapp_campaigns/${id}`, { whatsapp_campaign: body })
+}
+
 export interface AudiencePreview {
   total: number
   optedIn: number
