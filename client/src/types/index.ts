@@ -132,7 +132,11 @@ export interface PipelineStage {
   is_closed_won: boolean
   is_closed_lost: boolean
   color?: string
+  /** Disparador de auto-avance (Opportunities::StageAutomation); null = manual. */
+  auto_trigger?: StageAutoTrigger | null
 }
+
+export type StageAutoTrigger = 'whatsapp_outbound' | 'whatsapp_inbound' | 'bant_qualified'
 
 // Contact Types
 export type ContactKind = 'person' | 'company'

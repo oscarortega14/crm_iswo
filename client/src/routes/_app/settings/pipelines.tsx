@@ -27,6 +27,7 @@ import {
   Star,
   Power,
   PowerOff,
+  Zap,
 } from 'lucide-react'
 import { isAxiosError } from 'axios'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,13 @@ import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -62,8 +70,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import type { Pipeline, PipelineStage } from '@/types'
+import type { Pipeline, PipelineStage, StageAutoTrigger } from '@/types'
 import { cn } from '@/lib/utils'
+import { STAGE_AUTO_TRIGGER_LABELS, isStageAutoTrigger } from '@/lib/opportunityVisuals'
 import api from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
 import { jsonApiPrimaryList, mapPipelineResource } from '@/lib/opportunityApi'
@@ -157,6 +166,16 @@ function SortableStage({ stage, pipeline, onEdit, onDelete }: SortableStageProps
           {stage.is_closed_won ? 'Ganada' : 'Perdida'}
         </Badge>
       )}
+      {stage.auto_trigger && (
+        <Badge
+          variant="secondary"
+          className="gap-0.5 text-[10px]"
+          title={`Avance automático: ${STAGE_AUTO_TRIGGER_LABELS[stage.auto_trigger]}`}
+        >
+          <Zap className="h-2.5 w-2.5" />
+          Auto
+        </Badge>
+      )}
       <div className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <Button
           variant="ghost"
@@ -201,6 +220,7 @@ function PipelinesSettingsPage() {
   const [newStageProbability, setNewStageProbability] = useState(0)
   const [newStageClosedWon, setNewStageClosedWon] = useState(false)
   const [newStageClosedLost, setNewStageClosedLost] = useState(false)
+  const [newStageAutoTrigger, setNewStageAutoTrigger] = useState<StageAutoTrigger | 'none'>('none')
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState<Pipeline | null>(null)
   const [confirmDeleteStage, setConfirmDeleteStage] = useState<{ pipelineId: string; stageId: string; stageName: string } | null>(null)
 
@@ -313,6 +333,7 @@ function PipelinesSettingsPage() {
       setNewStageProbability(0)
       setNewStageClosedWon(false)
       setNewStageClosedLost(false)
+      setNewStageAutoTrigger('none')
     },
     onError: (err) => toast.error(apiMessage(err)),
   })
@@ -381,6 +402,7 @@ function PipelinesSettingsPage() {
     setNewStageProbability(0)
     setNewStageClosedWon(false)
     setNewStageClosedLost(false)
+    setNewStageAutoTrigger('none')
     setIsStageDialogOpen(true)
   }
 
@@ -392,6 +414,7 @@ function PipelinesSettingsPage() {
     setNewStageProbability(stage.probability ?? 0)
     setNewStageClosedWon(stage.is_closed_won)
     setNewStageClosedLost(stage.is_closed_lost)
+    setNewStageAutoTrigger(stage.auto_trigger ?? 'none')
     setIsStageDialogOpen(true)
   }
 
@@ -401,6 +424,8 @@ function PipelinesSettingsPage() {
     const maxPos = maxStagePosition(stages)
     const nextPosition = maxPos + 1
     const autoProbability = Math.min(100, Math.max(0, (nextPosition + 1) * 15))
+    const isTerminal = newStageClosedWon || newStageClosedLost
+    const autoRule = { trigger: !isTerminal && newStageAutoTrigger !== 'none' ? newStageAutoTrigger : '' }
 
     if (editingStage) {
       saveStageMutation.mutate({
@@ -412,6 +437,7 @@ function PipelinesSettingsPage() {
           probability: Math.min(100, Math.max(0, Math.floor(newStageProbability))),
           closed_won: newStageClosedWon,
           closed_lost: newStageClosedLost,
+          auto_rule: autoRule,
         },
       })
       return
@@ -426,9 +452,16 @@ function PipelinesSettingsPage() {
         probability: Math.min(100, Math.max(0, Math.floor(newStageProbability || autoProbability))),
         closed_won: newStageClosedWon,
         closed_lost: newStageClosedLost,
+        auto_rule: autoRule,
       },
     })
   }
+
+  /** Un disparador por pipeline: etapa que ya lo usa (excluida la que se edita). */
+  const triggerOwner = (trigger: StageAutoTrigger): PipelineStage | undefined =>
+    (selectedPipeline?.stages ?? []).find(
+      (s) => s.auto_trigger === trigger && s.id !== editingStage?.id,
+    )
 
   return (
     <div className="space-y-6">
@@ -806,6 +839,38 @@ function PipelinesSettingsPage() {
                 Cierre perdido
               </label>
             </div>
+            {!newStageClosedWon && !newStageClosedLost && (
+              <div className="space-y-2">
+                <Label htmlFor="stageAutoTrigger" className="flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5" />
+                  Avance automático
+                </Label>
+                <Select
+                  value={newStageAutoTrigger}
+                  onValueChange={(v) => setNewStageAutoTrigger(isStageAutoTrigger(v) ? v : 'none')}
+                >
+                  <SelectTrigger id="stageAutoTrigger">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Manual (sin regla)</SelectItem>
+                    {(Object.keys(STAGE_AUTO_TRIGGER_LABELS) as StageAutoTrigger[]).map((trigger) => {
+                      const owner = triggerOwner(trigger)
+                      return (
+                        <SelectItem key={trigger} value={trigger} disabled={Boolean(owner)}>
+                          {STAGE_AUTO_TRIGGER_LABELS[trigger]}
+                          {owner ? ` (usado en «${owner.name}»)` : ''}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  La oportunidad entra sola a esta etapa cuando ocurre el evento. Solo avanza, nunca
+                  retrocede ni cierra negocios, y respeta los retrocesos hechos a mano.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsStageDialogOpen(false)}>

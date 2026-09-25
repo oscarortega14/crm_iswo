@@ -70,7 +70,8 @@ module Api
       def stage_params
         params.require(:pipeline_stage).permit(
           :name, :position, :probability,
-          :closed_won, :closed_lost, :color
+          :closed_won, :closed_lost, :color,
+          auto_rule: [:trigger]
         )
       end
     end

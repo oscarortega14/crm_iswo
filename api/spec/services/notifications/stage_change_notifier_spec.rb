@@ -54,7 +54,8 @@ RSpec.describe Notifications::StageChangeNotifier do
         opportunity: opp,
         from_stage:  from_stage,
         to_stage:    to_stage,
-        automatic:   true
+        automatic:   true,
+        reason:      "calificación BANT"
       )
     end.to change { owner.notifications.kind_stage_change.count }.by(1)
 

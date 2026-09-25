@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import api, { formatRailsError } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
+import { isStageAutoTrigger } from '@/lib/opportunityVisuals'
 import type {
   Opportunity,
   OpportunityStatus,
@@ -89,6 +90,7 @@ function normalizeEmbeddedStage(s: Record<string, unknown>, index: number): Pipe
     is_closed_won: Boolean(s.is_closed_won ?? s.closed_won),
     is_closed_lost: Boolean(s.is_closed_lost ?? s.closed_lost),
     color: s.color != null ? String(s.color) : undefined,
+    auto_trigger: isStageAutoTrigger(s.auto_trigger) ? s.auto_trigger : null,
   }
 }
 

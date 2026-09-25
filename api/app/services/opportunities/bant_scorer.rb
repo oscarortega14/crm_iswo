@@ -45,8 +45,8 @@ module Opportunities
     end
 
     # Conveniencia: persiste el score en la opp y devuelve el número.
-    # Si la oportunidad recién supera el umbral, la avanza automáticamente
-    # a la etapa "Calificada" del pipeline (RFC §6.1 ciclo de vida).
+    # Si la oportunidad recién supera el umbral, la avanza a la etapa con
+    # disparador `bant_qualified` (RFC §6.1 ciclo de vida; ver StageAutomation).
     def call_and_persist!(sync_temperature: true)
       result    = call
       threshold = @criteria.threshold_qualified.to_i
@@ -58,7 +58,7 @@ module Opportunities
         bant_data:  (@opportunity.bant_data || {}).merge("breakdown" => result[:breakdown])
       )
 
-      auto_advance_stage! if newly_qualified
+      Opportunities::StageAutomation.call(opportunity: @opportunity, trigger: "bant_qualified") if newly_qualified
       sync_temperature! if sync_temperature
 
       result[:score]
@@ -68,36 +68,10 @@ module Opportunities
 
     private
 
-    # Mueve la oportunidad a la etapa "Calificada" del pipeline si:
-    #   1. Existe una etapa con ese nombre (case-insensitive) en el mismo pipeline.
-    #   2. La etapa actual tiene posición anterior (aún no ha pasado por allí).
-    #   3. La etapa actual no es terminal (won/lost).
     def sync_temperature!
       return unless defined?(Opportunities::TemperatureCalculator)
 
       Opportunities::TemperatureCalculator.new(@opportunity.reload).apply!
-    end
-
-    def auto_advance_stage!
-      qualified_stage = @opportunity.pipeline
-                                    .pipeline_stages
-                                    .find_by("lower(name) = ?", "calificada")
-      return unless qualified_stage
-      return if @opportunity.pipeline_stage_id == qualified_stage.id
-      return if @opportunity.pipeline_stage&.terminal?
-      return if (@opportunity.pipeline_stage&.position || 0) >= qualified_stage.position
-
-      old_stage_id = @opportunity.pipeline_stage_id
-      @opportunity.update!(
-        pipeline_stage_id: qualified_stage.id,
-        last_activity_at:  Time.current
-      )
-      @opportunity.opportunity_logs.create!(
-        tenant:       @tenant,
-        action:       "stage_change",
-        changes_data: { from_stage_id: old_stage_id, to_stage_id: qualified_stage.id },
-        note:         "Avance automático por calificación BANT"
-      )
     end
 
     def default_criteria

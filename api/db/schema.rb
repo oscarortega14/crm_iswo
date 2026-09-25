@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_17_151500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -296,6 +296,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_17_151500) do
   end
 
   create_table "pipeline_stages", force: :cascade do |t|
+    t.jsonb "auto_rule", default: {}, null: false, comment: "Regla de auto-avance: { trigger: whatsapp_outbound | whatsapp_inbound | bant_qualified }"
     t.boolean "closed_lost", default: false, null: false
     t.boolean "closed_won", default: false, null: false
     t.string "color", default: "#94A3B8"
