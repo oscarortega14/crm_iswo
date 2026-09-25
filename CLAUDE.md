@@ -88,6 +88,12 @@ whatsapp_outbound` y `Calificada ← bant_qualified` (verticales: solo BANT); la
 migración `AddAutoRuleToPipelineStages` precargó `bant_qualified` en las etapas
 "Calificada" existentes, así que el auto-avance BANT ya no depende del nombre.
 
+**Importación con etapa:** `Contacts::SpreadsheetImporter` acepta la columna
+`stage` (alias `etapa`, `estado`, `fase`) y ubica cada oportunidad en esa etapa
+del pipeline por defecto (sin distinguir mayúsculas/tildes; ganada/perdida
+sincroniza status). Etapa desconocida → primera etapa + `warnings` en la
+respuesta. La plantilla trae la hoja «Etapas» con los valores válidos del tenant.
+
 ---
 
 ### Campos personalizados por vertical (RFC F5)

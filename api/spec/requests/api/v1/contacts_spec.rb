@@ -242,6 +242,23 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(response.body.bytesize).to be_positive
     end
 
+    it "incluye la columna stage y la hoja Etapas del pipeline por defecto" do
+      require "roo"
+      pipeline = create(:pipeline, tenant: tenant, is_default: true)
+      create(:pipeline_stage, tenant: tenant, pipeline: pipeline, name: "Calificada")
+
+      get "/api/v1/contacts/import_template", headers: auth_headers(manager)
+
+      file = Tempfile.new(["plantilla", ".xlsx"], binmode: true)
+      file.write(response.body)
+      file.rewind
+      book = Roo::Excelx.new(file.path)
+      expect(book.sheet("Contactos").row(1)).to include("stage")
+      expect(book.sheets).to include("Etapas")
+    ensure
+      file&.close!
+    end
+
     it "consultant puede descargar plantilla (create)" do
       get "/api/v1/contacts/import_template", headers: auth_headers(consultant)
       expect(response).to have_http_status(:ok)

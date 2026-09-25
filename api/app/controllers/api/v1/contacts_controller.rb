@@ -213,8 +213,9 @@ module Api
 
         package = Axlsx::Package.new
         package.workbook.add_worksheet(name: "Contactos") do |sheet|
-          sheet.add_row %w[first_name last_name email phone company position city country kind notes]
+          sheet.add_row %w[first_name last_name email phone company position city country kind notes stage]
         end
+        add_import_stages_sheet!(package)
 
         tmp = Tempfile.new(["plantilla_contactos", ".xlsx"], binmode: true)
         begin
@@ -252,7 +253,8 @@ module Api
           data: {
             created_count: result.created_count,
             skipped_count: result.skipped_count,
-            errors:        result.errors
+            errors:        result.errors,
+            warnings:      result.warnings
           }
         }, status: :ok
       end
@@ -296,6 +298,23 @@ module Api
         )
       end
 
+      # Hoja de referencia: valores válidos para la columna `stage` (pipeline por defecto).
+      def add_import_stages_sheet!(package)
+        pipeline = Contacts::SpreadsheetImporter.default_pipeline(current_tenant)
+        return unless pipeline
+
+        package.workbook.add_worksheet(name: "Etapas") do |sheet|
+          sheet.add_row ["Etapas válidas para la columna stage — pipeline «#{pipeline.name}»"]
+          sheet.add_row ["Vacía = primera etapa. No distingue mayúsculas ni tildes."]
+          pipeline.pipeline_stages.where(discarded_at: nil).order(:position).each do |stage|
+            label = if stage.closed_won? then "(cierre ganado)"
+                    elsif stage.closed_lost? then "(cierre perdido)"
+                    end
+            sheet.add_row [stage.name, label].compact
+          end
+        end
+      end
+
       def audit_contact_import!(result, filename)
         AuditLogger.record!(
           tenant:       current_tenant,
@@ -306,7 +325,8 @@ module Api
             filename:      filename,
             created_count: result.created_count,
             skipped_count: result.skipped_count,
-            error_count:   result.errors.size
+            error_count:   result.errors.size,
+            warning_count: result.warnings.size
           },
           ip_address:   request.remote_ip,
           user_agent:   request.user_agent
