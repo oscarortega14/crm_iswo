@@ -56,20 +56,21 @@ module WhatsApp
 
     def build_message(provider, from_number, template)
       WhatsappMessage.new(
-        tenant:             @tenant,
-        opportunity:        @opportunity,
-        contact:            @contact,
-        direction:          "out",
-        provider:           provider,
-        from_number:        from_number,
-        to_number:          WhatsappPhone.normalize_to_e164(@to_number),
-        body:               template ? nil : @body,
-        media_url:          template ? nil : @media_url,
-        message_type:       template ? "template" : "text",
-        template_name:      template&.meta_template_name,
-        template_language:  template&.language,
-        template_params:    template ? Array(@template_params) : [],
-        status:             "queued"
+        tenant:                  @tenant,
+        opportunity:             @opportunity,
+        contact:                 @contact,
+        direction:               "out",
+        provider:                provider,
+        from_number:             from_number,
+        to_number:               WhatsappPhone.normalize_to_e164(@to_number),
+        body:                    template ? nil : @body,
+        media_url:               template ? nil : @media_url,
+        message_type:            template ? "template" : "text",
+        template_name:           template&.meta_template_name,
+        template_language:       template&.language,
+        template_params:         template ? Array(@template_params) : [],
+        template_variable_names: template ? Array(template.variable_names) : [],
+        status:                  "queued"
       )
     end
   end

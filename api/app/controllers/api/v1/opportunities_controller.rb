@@ -191,28 +191,51 @@ module Api
       def move_stage
         authorize @opportunity, :move_stage?
         new_stage = current_tenant.pipeline_stages.find(params.require(:pipeline_stage_id))
-        from_stage = @opportunity.pipeline_stage
-        from = @opportunity.pipeline_stage_id
 
-        new_status = if new_stage.closed_won  then "won"
-                     elsif new_stage.closed_lost then "lost"
-                     else @opportunity.status
-                     end
-
-        ActiveRecord::Base.transaction do
-          @opportunity.update!(
-            pipeline_stage_id: new_stage.id,
-            pipeline_id:       new_stage.pipeline_id,
-            status:            new_status
-          )
-          @opportunity.touch_activity!(recalc_temperature: false)
-          log_action!("stage_change", { from_stage_id: from, to_stage_id: new_stage.id })
-        end
-
-        notify_stage_change!(from_stage: from_stage, to_stage: new_stage) if from != new_stage.id
+        Opportunities::StageMover.call(
+          opportunity: @opportunity, stage: new_stage, actor: current_user, request_meta: request_meta
+        )
 
         render_resource(@opportunity, with: OpportunitySerializer, include: [:owner_user, :lead_source, :contact],
                         params: opportunity_serializer_params)
+      end
+
+      BULK_MOVE_MAX = 500
+
+      # POST /api/v1/opportunities/bulk_move_stage  { ids: [...], pipeline_stage_id }
+      # Mueve solo las que el usuario puede mover (consultor: propias; nunca las
+      # de la red en solo lectura) y reporta las omitidas con motivo.
+      def bulk_move_stage
+        authorize Opportunity, :bulk_move_stage?
+        ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+        if ids.blank? || ids.size > BULK_MOVE_MAX
+          return render json: { error: "bad_request", message: "ids requeridos (máximo #{BULK_MOVE_MAX})" },
+                        status: :bad_request
+        end
+
+        stage   = current_tenant.pipeline_stages.find(params.require(:pipeline_stage_id))
+        found   = policy_scope(Opportunity).kept.where(id: ids).includes(:pipeline_stage).index_by(&:id)
+        moved   = 0
+        skipped = []
+
+        ids.each do |id|
+          opp = found[id]
+          reason =
+            if opp.nil? then "no encontrada"
+            elsif !policy(opp).move_stage? then "sin permiso"
+            elsif opp.pipeline_stage_id == stage.id then "ya estaba en esa etapa"
+            end
+          next skipped << { id: id.to_s, reason: reason } if reason
+
+          Opportunities::StageMover.call(
+            opportunity: opp, stage: stage, actor: current_user, request_meta: request_meta, bulk: true
+          )
+          moved += 1
+        rescue ActiveRecord::RecordInvalid => e
+          skipped << { id: id.to_s, reason: e.record.errors.full_messages.to_sentence.presence || "inválida" }
+        end
+
+        render json: { data: { moved: moved, skipped: skipped, stage_name: stage.name } }, status: :ok
       end
 
       # POST /api/v1/opportunities/:id/assign  { owner_user_id }
@@ -565,6 +588,10 @@ module Api
             anthropic_error:   classifier&.last_error
           }.compact
         }
+      end
+
+      def request_meta
+        { ip_address: request.remote_ip, user_agent: request.user_agent }
       end
 
       def log_action!(action, changes_data)

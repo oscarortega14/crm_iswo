@@ -56,7 +56,12 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
       await invalidateContactsQueries(queryClient)
       setImportResult(data)
       const errCount = data.errors?.length ?? 0
-      if (data.created_count > 0 && errCount === 0) {
+      const warnCount = data.warnings?.length ?? 0
+      if (data.created_count > 0 && errCount === 0 && warnCount > 0) {
+        toast.warning(
+          `Importación lista: ${data.created_count} creado${data.created_count === 1 ? '' : 's'} · ${warnCount} fila${warnCount === 1 ? '' : 's'} con etapa ajustada`,
+        )
+      } else if (data.created_count > 0 && errCount === 0) {
         toast.success(
           `Importación lista: ${data.created_count} contacto${data.created_count === 1 ? '' : 's'} creado${data.created_count === 1 ? '' : 's'}` +
             (data.skipped_count
@@ -109,6 +114,7 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
   }
 
   const errCount = importResult?.errors?.length ?? 0
+  const warnings = importResult?.warnings ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -129,12 +135,17 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
               <p>
                 <span className="font-medium text-foreground">Columnas:</span>{' '}
                 <code className="rounded bg-muted px-1 text-xs">
-                  first_name, last_name, email, phone, company, position, city, country, kind, notes
+                  first_name, last_name, email, phone, company, position, city, country, kind, notes,
+                  stage
                 </code>
               </p>
               <p className="text-xs">
                 Primera fila = cabeceras · También en español (nombre, apellido, correo…) ·{' '}
                 <code className="text-xs">kind = company</code> para empresas
+              </p>
+              <p className="text-xs">
+                <span className="font-medium text-foreground">stage / etapa:</span> nombre de la etapa
+                del pipeline por defecto (ver hoja «Etapas» de la plantilla). Vacía = primera etapa.
               </p>
             </div>
 
@@ -202,13 +213,13 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
                 className={`rounded-md border px-3 py-2.5 text-sm ${
                   errCount > 0 && importResult.created_count === 0
                     ? 'border-destructive/40 bg-destructive/5'
-                    : errCount > 0
+                    : errCount > 0 || warnings.length > 0
                       ? 'border-amber-500/40 bg-amber-500/5'
                       : 'border-emerald-500/40 bg-emerald-500/5'
                 }`}
               >
                 <div className="flex items-start gap-2">
-                  {errCount > 0 ? (
+                  {errCount > 0 || warnings.length > 0 ? (
                     <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
                   ) : (
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
@@ -230,6 +241,12 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
                           <span className="text-foreground">{errCount}</span> filas con error
                         </li>
                       )}
+                      {warnings.length > 0 && (
+                        <li>
+                          <span className="text-foreground">{warnings.length}</span> importadas en la
+                          primera etapa (etapa no reconocida)
+                        </li>
+                      )}
                     </ul>
                     {errCount > 0 && (
                       <ul className="mt-2 max-h-32 overflow-y-auto rounded border bg-background/80 px-2 py-1.5 text-xs text-foreground">
@@ -242,6 +259,15 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
                             ) : (
                               e.message
                             )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {warnings.length > 0 && (
+                      <ul className="mt-2 max-h-32 overflow-y-auto rounded border border-amber-500/30 bg-background/80 px-2 py-1.5 text-xs text-foreground">
+                        {warnings.map((w) => (
+                          <li key={`${w.row}-${w.message}`} className="py-0.5">
+                            Fila <strong>{w.row}</strong>: {w.message}
                           </li>
                         ))}
                       </ul>

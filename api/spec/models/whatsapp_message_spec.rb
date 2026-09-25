@@ -78,4 +78,63 @@ RSpec.describe WhatsappMessage, type: :model do
       expect(WhatsappMessage.recent.first.created_at).to be >= WhatsappMessage.recent.last.created_at
     end
   end
+
+  describe "opt-in automático al recibir un mensaje entrante" do
+    it "marca whatsapp_opt_in_at con source reply_stop_in si el contacto no tenía opt-in" do
+      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+
+      expect(contact.reload.whatsapp_opted_in?).to be(true)
+      expect(contact.whatsapp_opt_in_source).to eq("reply_stop_in")
+    end
+
+    it "no pisa un opt-in ya existente" do
+      contact.mark_whatsapp_opt_in!(source: "manual")
+      original_at = contact.whatsapp_opt_in_at
+
+      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+
+      expect(contact.reload.whatsapp_opt_in_source).to eq("manual")
+      expect(contact.whatsapp_opt_in_at).to eq(original_at)
+    end
+
+    it "no marca opt-in para mensajes salientes" do
+      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact)
+      expect(contact.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "no falla si el mensaje no tiene contacto asociado" do
+      expect { create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: nil) }.not_to raise_error
+    end
+  end
+
+  describe "auto-avance de etapa (StageAutomation)" do
+    let(:opp) { create(:opportunity, :skip_bant_recalc, tenant: tenant, contact: contact) }
+
+    it "entrante dispara whatsapp_inbound al crearse" do
+      expect(Opportunities::StageAutomation).to receive(:call_for_contact)
+        .with(contact: contact, opportunity: opp, trigger: "whatsapp_inbound")
+      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+    end
+
+    it "saliente dispara whatsapp_outbound solo cuando el proveedor confirma el envío" do
+      msg = create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+
+      expect(Opportunities::StageAutomation).to receive(:call_for_contact)
+        .with(contact: contact, opportunity: opp, trigger: "whatsapp_outbound").once
+      msg.update!(status: "sent")
+      msg.update!(status: "delivered")
+    end
+
+    it "saliente fallido (p.ej. 131047) no dispara" do
+      msg = create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+
+      expect(Opportunities::StageAutomation).not_to receive(:call_for_contact)
+      msg.update!(status: "failed", error_message: "131047")
+    end
+
+    it "ignora mensajes sin contacto (avisos de recordatorio al consultor)" do
+      expect(Opportunities::StageAutomation).not_to receive(:call_for_contact)
+      create(:whatsapp_message, :outbound, :twilio, :sent, tenant: tenant, contact: nil, opportunity: opp)
+    end
+  end
 end

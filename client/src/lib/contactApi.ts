@@ -47,6 +47,8 @@ export interface ContactSummary {
   lastContactedAt?: string
   customFields?: Record<string, unknown>
   landingOrigins?: ContactLandingOrigin[]
+  whatsappOptedIn?: boolean
+  whatsappOptInSource?: string
 }
 
 type ContactAttributes = {
@@ -71,6 +73,8 @@ type ContactAttributes = {
   last_contacted_at?: string
   custom_fields?: Record<string, unknown>
   landing_origins?: ContactLandingOrigin[]
+  whatsapp_opted_in?: boolean
+  whatsapp_opt_in_source?: string
 }
 
 export interface ContactListFilters {
@@ -134,6 +138,8 @@ export function mapContactResource(resource: JsonApiResource): ContactSummary {
           created_at: o.created_at,
         }))
       : undefined,
+    whatsappOptedIn: attrs.whatsapp_opted_in === true,
+    whatsappOptInSource: attrs.whatsapp_opt_in_source?.trim() || undefined,
   }
 }
 
@@ -240,6 +246,11 @@ export async function bulkDeleteContacts(ids: string[]): Promise<{ deleted: numb
   return (response.data as { data: { deleted: number } }).data
 }
 
+export async function bulkMarkWhatsappOptIn(ids: string[]): Promise<{ marked: number }> {
+  const response = await api.post('/contacts/bulk_whatsapp_opt_in', { ids })
+  return (response.data as { data: { marked: number } }).data
+}
+
 export async function assignContactOwner(contactId: string, ownerUserId: string): Promise<void> {
   await api.patch(`/contacts/${contactId}`, {
     contact: { owner_user_id: ownerUserId },
@@ -304,6 +315,8 @@ export type ContactImportResult = {
   created_count: number
   skipped_count: number
   errors: Array<{ row: number; message: string }>
+  /** Filas importadas con ajuste (p.ej. etapa desconocida → primera etapa). */
+  warnings?: Array<{ row: number; message: string }>
 }
 
 export async function downloadContactImportTemplate(): Promise<void> {

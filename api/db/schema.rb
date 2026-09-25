@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -94,6 +94,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
     t.string "source_label"
     t.bigint "tenant_id", null: false
     t.datetime "updated_at", null: false
+    t.datetime "whatsapp_opt_in_at"
+    t.string "whatsapp_opt_in_source", comment: "manual | import | form | reply_stop_in"
     t.index "((((COALESCE(first_name, ''::character varying))::text || ' '::text) || (COALESCE(last_name, ''::character varying))::text)) gin_trgm_ops", name: "index_contacts_on_full_name_trgm", using: :gin
     t.index "tenant_id, lower((email)::text)", name: "index_contacts_on_lower_email", where: "((email IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["discarded_at"], name: "index_contacts_on_discarded_at"
@@ -103,6 +105,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
     t.index ["tenant_id", "owner_user_id"], name: "index_contacts_on_tenant_id_and_owner_user_id"
     t.index ["tenant_id", "phone_e164_bidx"], name: "index_contacts_on_tenant_id_and_phone_e164_bidx", where: "((phone_e164_bidx IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["tenant_id"], name: "index_contacts_on_tenant_id"
+    t.index ["whatsapp_opt_in_at"], name: "index_contacts_on_whatsapp_opt_in_at"
   end
 
   create_table "duplicate_flags", force: :cascade do |t|
@@ -293,6 +296,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
   end
 
   create_table "pipeline_stages", force: :cascade do |t|
+    t.jsonb "auto_rule", default: {}, null: false, comment: "Regla de auto-avance: { trigger: whatsapp_outbound | whatsapp_inbound | bant_qualified }"
     t.boolean "closed_lost", default: false, null: false
     t.boolean "closed_won", default: false, null: false
     t.string "color", default: "#94A3B8"
@@ -579,6 +583,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
     t.index ["unlock_token"], name: "index_users_on_unlock_token", unique: true, where: "(unlock_token IS NOT NULL)"
   end
 
+  create_table "whatsapp_campaign_recipients", force: :cascade do |t|
+    t.bigint "contact_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "opportunity_id"
+    t.text "skip_reason"
+    t.string "status", default: "pending", null: false, comment: "pending | sent | failed | skipped_no_opt_in | skipped_no_phone"
+    t.bigint "tenant_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "whatsapp_campaign_id", null: false
+    t.bigint "whatsapp_message_id"
+    t.index ["contact_id"], name: "index_whatsapp_campaign_recipients_on_contact_id"
+    t.index ["opportunity_id"], name: "index_whatsapp_campaign_recipients_on_opportunity_id"
+    t.index ["tenant_id"], name: "index_whatsapp_campaign_recipients_on_tenant_id"
+    t.index ["whatsapp_campaign_id", "contact_id"], name: "index_wa_campaign_recipients_unique_contact", unique: true
+    t.index ["whatsapp_campaign_id", "status"], name: "idx_on_whatsapp_campaign_id_status_f15515cb59"
+    t.index ["whatsapp_campaign_id"], name: "index_whatsapp_campaign_recipients_on_whatsapp_campaign_id"
+    t.index ["whatsapp_message_id"], name: "index_whatsapp_campaign_recipients_on_whatsapp_message_id"
+  end
+
+  create_table "whatsapp_campaigns", force: :cascade do |t|
+    t.jsonb "audience_filters", default: {}, null: false, comment: "snapshot de los mismos filtros de /opportunities (pipeline_id, stage_id, owner_id, temperature, status)"
+    t.integer "batch_interval_minutes", default: 15, null: false
+    t.integer "batch_size", default: 40, null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.bigint "created_by_user_id"
+    t.integer "failed_count", default: 0, null: false
+    t.datetime "last_batch_at"
+    t.string "name", null: false
+    t.integer "sent_count", default: 0, null: false
+    t.integer "skipped_no_opt_in_count", default: 0, null: false
+    t.datetime "started_at"
+    t.string "status", default: "draft", null: false, comment: "draft | scheduled | running | paused | completed | canceled"
+    t.bigint "tenant_id", null: false
+    t.integer "total_recipients", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "variable_field_map", default: [], null: false, comment: "paralelo a whatsapp_template.variable_names — de qué campo sacar cada variable"
+    t.bigint "whatsapp_template_id", null: false
+    t.index ["created_by_user_id"], name: "index_whatsapp_campaigns_on_created_by_user_id"
+    t.index ["tenant_id", "status"], name: "index_whatsapp_campaigns_on_tenant_id_and_status"
+    t.index ["tenant_id"], name: "index_whatsapp_campaigns_on_tenant_id"
+    t.index ["whatsapp_template_id"], name: "index_whatsapp_campaigns_on_whatsapp_template_id"
+  end
+
   create_table "whatsapp_messages", force: :cascade do |t|
     t.text "body"
     t.bigint "contact_id"
@@ -600,6 +648,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
     t.string "template_language"
     t.string "template_name"
     t.jsonb "template_params", default: [], null: false
+    t.jsonb "template_variable_names", default: [], null: false
     t.bigint "tenant_id", null: false
     t.string "to_number", null: false
     t.datetime "updated_at", null: false
@@ -624,6 +673,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
     t.bigint "tenant_id", null: false
     t.datetime "updated_at", null: false
     t.jsonb "variable_labels", default: [], null: false
+    t.jsonb "variable_names", default: [], null: false
     t.index ["tenant_id", "meta_template_name", "language"], name: "index_whatsapp_templates_on_tenant_and_meta_name_and_lang", unique: true
     t.index ["tenant_id"], name: "index_whatsapp_templates_on_tenant_id"
   end
@@ -675,6 +725,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_170500) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "tenant_field_definitions", "tenants"
   add_foreign_key "users", "tenants"
+  add_foreign_key "whatsapp_campaign_recipients", "contacts"
+  add_foreign_key "whatsapp_campaign_recipients", "opportunities"
+  add_foreign_key "whatsapp_campaign_recipients", "tenants"
+  add_foreign_key "whatsapp_campaign_recipients", "whatsapp_campaigns"
+  add_foreign_key "whatsapp_campaign_recipients", "whatsapp_messages"
+  add_foreign_key "whatsapp_campaigns", "tenants"
+  add_foreign_key "whatsapp_campaigns", "users", column: "created_by_user_id"
+  add_foreign_key "whatsapp_campaigns", "whatsapp_templates"
   add_foreign_key "whatsapp_messages", "contacts"
   add_foreign_key "whatsapp_messages", "opportunities"
   add_foreign_key "whatsapp_messages", "tenants"

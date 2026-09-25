@@ -2,24 +2,26 @@
 
 module Notifications
   # Notifica al dueño de la oportunidad cuando la etapa del pipeline cambia.
-  # No notifica si quien mueve la etapa es el mismo dueño (salvo avance automático BANT).
+  # No notifica si quien mueve la etapa es el mismo dueño (salvo avance automático).
   class StageChangeNotifier
-    def self.call(opportunity:, from_stage:, to_stage:, actor: nil, automatic: false)
+    def self.call(opportunity:, from_stage:, to_stage:, actor: nil, automatic: false, reason: nil)
       new(
         opportunity: opportunity,
         from_stage:  from_stage,
         to_stage:    to_stage,
         actor:       actor,
-        automatic:   automatic
+        automatic:   automatic,
+        reason:      reason
       ).call
     end
 
-    def initialize(opportunity:, from_stage:, to_stage:, actor: nil, automatic: false)
+    def initialize(opportunity:, from_stage:, to_stage:, actor: nil, automatic: false, reason: nil)
       @opportunity = opportunity
       @from_stage  = from_stage
       @to_stage    = to_stage
       @actor       = actor
       @automatic   = automatic
+      @reason      = reason
     end
 
     def call
@@ -52,7 +54,7 @@ module Notifications
       label     = @opportunity.contact&.display_name.presence || @opportunity.title
 
       if @automatic
-        "«#{label}» pasó de #{from_name} a #{to_name} (calificación BANT)"
+        "«#{label}» pasó de #{from_name} a #{to_name} (automático: #{@reason.presence || 'regla de etapa'})"
       elsif @actor
         "#{@actor.name} movió «#{label}» de #{from_name} a #{to_name}"
       else

@@ -11,5 +11,7 @@ class PipelineStageSerializer < ApplicationSerializer
     s.closed_won || s.closed_lost
   end
 
+  attribute :auto_trigger, &:auto_trigger
+
   belongs_to :pipeline, serializer: :pipeline
 end

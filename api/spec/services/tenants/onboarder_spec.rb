@@ -34,6 +34,14 @@ RSpec.describe Tenants::Onboarder do
       expect(names).to include("Nueva", "Calificada", "Ganada", "Perdida")
     end
 
+    it "siembra reglas de auto-avance (Contactada ← WhatsApp enviado, Calificada ← BANT)" do
+      result = onboarder.call
+      triggers = ActsAsTenant.with_tenant(result.tenant) do
+        result.pipeline.pipeline_stages.to_h { |s| [s.name, s.auto_trigger] }
+      end
+      expect(triggers).to include("Contactada" => "whatsapp_outbound", "Calificada" => "bant_qualified", "Nueva" => nil)
+    end
+
     it "crea las fuentes de lead por defecto" do
       result = onboarder.call
       ActsAsTenant.with_tenant(result.tenant) do
@@ -112,6 +120,8 @@ RSpec.describe Tenants::Onboarder do
         expect(result.tenant.settings["industry"]).to eq("real_estate")
         ActsAsTenant.with_tenant(result.tenant) do
           expect(result.pipeline.pipeline_stages.count).to eq(8)
+          # Verticales: solo "Calificada" recibe regla (BANT), como antes.
+          expect(result.pipeline.pipeline_stages.where.not(auto_rule: {}).map(&:auto_trigger)).to eq(["bant_qualified"])
         end
       end
     end

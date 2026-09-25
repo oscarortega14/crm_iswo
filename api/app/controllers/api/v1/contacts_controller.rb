@@ -127,6 +127,45 @@ module Api
         render json: { data: { deleted: deleted } }, status: :ok
       end
 
+      # POST /api/v1/contacts/backfill_whatsapp_opt_in?dry_run=true
+      # Marca opt-in a contactos que ya escribieron por WhatsApp antes de que
+      # existiera el gate de opt-in (WhatsappMessage#mark_contact_whatsapp_opt_in
+      # ya lo hace automático para mensajes nuevos desde ahora en adelante).
+      # dry_run=true solo cuenta, no persiste — para previsualizar el impacto.
+      def backfill_whatsapp_opt_in
+        authorize Contact, :destroy?
+
+        scope = policy_scope(Contact).kept
+                                      .where(whatsapp_opt_in_at: nil)
+                                      .where(id: current_tenant.whatsapp_messages.inbound.select(:contact_id))
+
+        count = scope.count
+        unless ActiveModel::Type::Boolean.new.cast(params[:dry_run])
+          scope.find_each { |c| c.mark_whatsapp_opt_in!(source: "reply_stop_in") }
+        end
+
+        render json: { data: { count: count, dry_run: ActiveModel::Type::Boolean.new.cast(params[:dry_run]) } },
+               status: :ok
+      end
+
+      # POST /api/v1/contacts/bulk_whatsapp_opt_in — { ids: ["1","2",...] }
+      # Opt-in manual: el admin/manager confirma que tiene consentimiento
+      # verificado fuera del sistema (cliente existente, permiso presencial,
+      # etc). Nunca se marca en bloque sin esta confirmación explícita.
+      def bulk_whatsapp_opt_in
+        authorize Contact, :bulk_whatsapp_opt_in?
+        ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+        return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.blank?
+
+        contacts = policy_scope(Contact).kept.where(id: ids).where(whatsapp_opt_in_at: nil)
+        marked = contacts.count
+        contacts.find_each do |c|
+          c.mark_whatsapp_opt_in!(source: "manual")
+          audit_contact!("contact.whatsapp_opt_in", c)
+        end
+        render json: { data: { marked: marked } }, status: :ok
+      end
+
       # GET /api/v1/contacts/check_duplicates?phone=...&email=...&full_name=...
       # Llamado desde el form del SPA mientras el consultor escribe.
       # Devuelve { data: { exists: bool, opportunity?: { id, contact_name, owner_name, created_at } } }
@@ -174,8 +213,9 @@ module Api
 
         package = Axlsx::Package.new
         package.workbook.add_worksheet(name: "Contactos") do |sheet|
-          sheet.add_row %w[first_name last_name email phone company position city country kind notes]
+          sheet.add_row %w[first_name last_name email phone company position city country kind notes stage]
         end
+        add_import_stages_sheet!(package)
 
         tmp = Tempfile.new(["plantilla_contactos", ".xlsx"], binmode: true)
         begin
@@ -213,7 +253,8 @@ module Api
           data: {
             created_count: result.created_count,
             skipped_count: result.skipped_count,
-            errors:        result.errors
+            errors:        result.errors,
+            warnings:      result.warnings
           }
         }, status: :ok
       end
@@ -257,6 +298,23 @@ module Api
         )
       end
 
+      # Hoja de referencia: valores válidos para la columna `stage` (pipeline por defecto).
+      def add_import_stages_sheet!(package)
+        pipeline = Contacts::SpreadsheetImporter.default_pipeline(current_tenant)
+        return unless pipeline
+
+        package.workbook.add_worksheet(name: "Etapas") do |sheet|
+          sheet.add_row ["Etapas válidas para la columna stage — pipeline «#{pipeline.name}»"]
+          sheet.add_row ["Vacía = primera etapa. No distingue mayúsculas ni tildes."]
+          pipeline.pipeline_stages.where(discarded_at: nil).order(:position).each do |stage|
+            label = if stage.closed_won? then "(cierre ganado)"
+                    elsif stage.closed_lost? then "(cierre perdido)"
+                    end
+            sheet.add_row [stage.name, label].compact
+          end
+        end
+      end
+
       def audit_contact_import!(result, filename)
         AuditLogger.record!(
           tenant:       current_tenant,
@@ -267,7 +325,8 @@ module Api
             filename:      filename,
             created_count: result.created_count,
             skipped_count: result.skipped_count,
-            error_count:   result.errors.size
+            error_count:   result.errors.size,
+            warning_count: result.warnings.size
           },
           ip_address:   request.remote_ip,
           user_agent:   request.user_agent

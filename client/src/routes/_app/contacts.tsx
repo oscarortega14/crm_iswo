@@ -17,6 +17,7 @@ import {
   Filter,
   Trash2,
   Upload,
+  MessageCircle,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -64,6 +65,7 @@ import api, { formatRailsError } from '@/lib/api'
 import { ContactsQuickMetrics } from '@/components/contacts/ContactsQuickMetrics'
 import {
   bulkDeleteContacts,
+  bulkMarkWhatsappOptIn,
   contactListErrorMessage,
   deleteContact,
   fetchContactsList,
@@ -120,6 +122,7 @@ function ContactsPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [confirmBulkOptIn, setConfirmBulkOptIn] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
 
   const handleRefresh = async () => {
@@ -242,6 +245,8 @@ function ContactsPage() {
   const totalPages = contactsData?.totalPages ?? 1
   const companyTotalPages = companiesData?.totalPages ?? 1
   const canDeleteContacts = userRole === 'admin'
+  const canManageWhatsappOptIn = userRole === 'admin' || userRole === 'manager'
+  const canSelectContacts = canDeleteContacts || canManageWhatsappOptIn
 
   const canEditContact = (contact: ContactRow) => {
     if (userRole === 'viewer') return false
@@ -290,6 +295,23 @@ function ContactsPage() {
     },
     onError: (err: unknown) => {
       toast.error(formatRailsError(err, 'No se pudieron eliminar los contactos'))
+    },
+  })
+
+  const bulkOptInMutation = useMutation({
+    mutationFn: () => bulkMarkWhatsappOptIn(Array.from(selectedIds)),
+    onSuccess: (result) => {
+      toast.success(
+        result.marked > 0
+          ? `${result.marked} contacto(s) marcado(s) con opt-in de WhatsApp`
+          : 'Los contactos seleccionados ya tenían opt-in',
+      )
+      setSelectedIds(new Set())
+      setConfirmBulkOptIn(false)
+      void invalidateContactsQueries(queryClient)
+    },
+    onError: (err: unknown) => {
+      toast.error(formatRailsError(err, 'No se pudo marcar el opt-in de WhatsApp'))
     },
   })
 
@@ -457,23 +479,37 @@ function ContactsPage() {
 
         <TabsContent value="contacts" className="mt-4">
           {/* Barra de acción masiva */}
-          {selectedIds.size > 0 && canDeleteContacts && (
+          {selectedIds.size > 0 && canSelectContacts && (
             <div className="mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2">
               <span className="text-sm font-medium">
                 {selectedIds.size} contacto(s) seleccionado(s)
               </span>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="ml-auto gap-1.5"
-                onClick={() => setConfirmBulkDelete(true)}
-              >
-                <Trash2 className="size-3.5" />
-                Eliminar seleccionados
-              </Button>
+              {canManageWhatsappOptIn && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => setConfirmBulkOptIn(true)}
+                >
+                  <MessageCircle className="size-3.5" />
+                  Marcar opt-in WhatsApp
+                </Button>
+              )}
+              {canDeleteContacts && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className={canManageWhatsappOptIn ? 'gap-1.5' : 'ml-auto gap-1.5'}
+                  onClick={() => setConfirmBulkDelete(true)}
+                >
+                  <Trash2 className="size-3.5" />
+                  Eliminar seleccionados
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
+                className={canManageWhatsappOptIn && !canDeleteContacts ? 'ml-auto' : undefined}
                 onClick={() => setSelectedIds(new Set())}
               >
                 Cancelar
@@ -499,7 +535,7 @@ function ContactsPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        {canDeleteContacts && (
+                        {canSelectContacts && (
                           <TableHead className="w-10">
                             <Checkbox
                               checked={
@@ -523,6 +559,7 @@ function ContactsPage() {
                         <TableHead>Empresa</TableHead>
                         <TableHead>Cargo</TableHead>
                         <TableHead>Origen</TableHead>
+                        <TableHead>WhatsApp</TableHead>
                         <TableHead className="w-10"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -530,7 +567,7 @@ function ContactsPage() {
                       {(contactsData?.contacts.length ?? 0) === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={canDeleteContacts ? 8 : 7}
+                            colSpan={canSelectContacts ? 9 : 8}
                             className="h-32 text-center text-sm text-muted-foreground"
                           >
                             {debouncedQ.length >= 2 || searchFromUrl.owner || searchFromUrl.segment
@@ -545,7 +582,7 @@ function ContactsPage() {
                           className={selectedIds.has(contact.id) ? 'bg-muted/40 cursor-pointer' : 'cursor-pointer'}
                           onClick={() => handleContactClick(contact)}
                         >
-                          {canDeleteContacts && (
+                          {canSelectContacts && (
                             <TableCell
                               className="w-10"
                               onClick={(e) => e.stopPropagation()}
@@ -597,6 +634,16 @@ function ContactsPage() {
                             )}
                           </TableCell>
                           <TableCell>
+                            {contact.whatsappOptedIn ? (
+                              <Badge className="gap-1 bg-green-600/10 text-green-700 hover:bg-green-600/10 text-xs">
+                                <MessageCircle className="size-3" />
+                                Opt-in
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Sin opt-in</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                                 <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -625,6 +672,17 @@ function ContactsPage() {
                                 >
                                   Ir a Oportunidades
                                 </DropdownMenuItem>
+                                {canManageWhatsappOptIn && !contact.whatsappOptedIn && (
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedIds(new Set([contact.id]))
+                                      setConfirmBulkOptIn(true)
+                                    }}
+                                  >
+                                    Marcar opt-in WhatsApp
+                                  </DropdownMenuItem>
+                                )}
                                 {canDeleteContacts && (
                                   <DropdownMenuItem
                                     className="text-destructive"
@@ -874,6 +932,29 @@ function ContactsPage() {
               onClick={() => bulkDeleteMutation.mutate()}
             >
               Eliminar {selectedIds.size} contacto(s)
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmBulkOptIn}
+        onOpenChange={(o) => { if (!o) setConfirmBulkOptIn(false) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar opt-in de WhatsApp — {selectedIds.size} contacto(s)</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirma que estos contactos dieron su consentimiento para recibir mensajes de
+              WhatsApp por un medio verificado fuera del sistema (cliente existente, permiso
+              presencial o telefónico, etc). No marques opt-in sin ese consentimiento real: Meta
+              puede restringir o banear el número de WhatsApp si detecta envíos sin permiso.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => bulkOptInMutation.mutate()}>
+              Confirmar opt-in
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

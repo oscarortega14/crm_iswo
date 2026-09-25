@@ -49,7 +49,10 @@ const COLUMN_LABELS: Record<string, string> = {
 interface OpportunitiesTableProps {
   opportunities: Opportunity[]
   onSelectOpportunity: (id: string) => void
-  canBulkDelete?: boolean
+  /** Muestra checkboxes de selección (acciones en lote: mover etapa, eliminar). */
+  selectable?: boolean
+  /** Filas que el usuario puede seleccionar (p.ej. consultor: solo propias). */
+  isRowSelectable?: (opportunity: Opportunity) => boolean
   selectedIds?: Set<string>
   onSelectionChange?: (id: string, selected: boolean) => void
   onSelectAllOnPage?: (selected: boolean, pageIds: string[]) => void
@@ -60,7 +63,8 @@ const columnHelper = createColumnHelper<Opportunity>()
 export function OpportunitiesTable({
   opportunities,
   onSelectOpportunity,
-  canBulkDelete = false,
+  selectable = false,
+  isRowSelectable,
   selectedIds,
   onSelectionChange,
   onSelectAllOnPage,
@@ -243,13 +247,14 @@ export function OpportunitiesTable({
   })
 
   const pageRows = table.getRowModel().rows
-  const pageIds = pageRows.map((r) => r.original.id)
+  const canSelectRow = (opp: Opportunity) => !isRowSelectable || isRowSelectable(opp)
+  const pageIds = pageRows.filter((r) => canSelectRow(r.original)).map((r) => r.original.id)
   const allOnPageSelected =
-    canBulkDelete &&
+    selectable &&
     pageIds.length > 0 &&
     pageIds.every((id) => selectedIds?.has(id))
   const someOnPageSelected =
-    canBulkDelete && pageIds.some((id) => selectedIds?.has(id))
+    selectable && pageIds.some((id) => selectedIds?.has(id))
 
   return (
     <div className="flex flex-col h-full">
@@ -286,7 +291,7 @@ export function OpportunitiesTable({
           <thead className="sticky top-0 bg-background border-b">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
-                {canBulkDelete && (
+                {selectable && (
                   <th className="h-10 w-10 px-2 text-left align-middle">
                     <Checkbox
                       checked={
@@ -296,6 +301,7 @@ export function OpportunitiesTable({
                         onSelectAllOnPage?.(checked === true, pageIds)
                       }
                       onClick={(e) => e.stopPropagation()}
+                      disabled={pageIds.length === 0}
                       aria-label="Seleccionar página"
                     />
                   </th>
@@ -320,7 +326,7 @@ export function OpportunitiesTable({
             {table.getRowModel().rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length + (canBulkDelete ? 1 : 0)}
+                  colSpan={columns.length + (selectable ? 1 : 0)}
                   className="h-24 text-center text-muted-foreground"
                 >
                   No hay oportunidades
@@ -338,13 +344,14 @@ export function OpportunitiesTable({
                     row.original.status === 'won'  && 'bg-green-50/40 dark:bg-green-950/20',
                   )}
                 >
-                  {canBulkDelete && (
+                  {selectable && (
                     <td
                       className="w-10 px-2 py-3 align-middle"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Checkbox
                         checked={selectedIds?.has(row.original.id) ?? false}
+                        disabled={!canSelectRow(row.original)}
                         onCheckedChange={(checked) =>
                           onSelectionChange?.(row.original.id, checked === true)
                         }

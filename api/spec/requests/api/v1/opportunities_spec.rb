@@ -240,6 +240,62 @@ RSpec.describe "Api::V1::Opportunities", type: :request do
     end
   end
 
+  describe "POST /api/v1/opportunities/bulk_move_stage" do
+    let(:mid_stage) { pipeline.pipeline_stages.order(:position)[1] }
+
+    def bulk_move(user, ids, stage_id = mid_stage.id)
+      post "/api/v1/opportunities/bulk_move_stage",
+           params: { ids: ids.map(&:to_s), pipeline_stage_id: stage_id }.to_json,
+           headers: auth_headers(user)
+    end
+
+    it "manager mueve varias y registra log manual en cada una" do
+      bulk_move(manager, [own_opp.id, foreign_opp.id])
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "moved")).to eq(2)
+      expect(json.dig("data", "skipped")).to eq([])
+      expect([own_opp.reload, foreign_opp.reload].map(&:pipeline_stage_id)).to all(eq(mid_stage.id))
+      log = own_opp.opportunity_logs.where(action: "stage_change").last
+      expect(log.user_id).to eq(manager.id)
+      expect(log.changes_data).to include("bulk" => true, "to_stage_id" => mid_stage.id)
+    end
+
+    it "consultant solo mueve las propias; las ajenas quedan como omitidas" do
+      bulk_move(consultant, [own_opp.id, foreign_opp.id])
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "moved")).to eq(1)
+      expect(json.dig("data", "skipped")).to contain_exactly(
+        { "id" => foreign_opp.id.to_s, "reason" => "no encontrada" }
+      )
+      expect(own_opp.reload.pipeline_stage_id).to eq(mid_stage.id)
+      expect(foreign_opp.reload.pipeline_stage_id).to eq(stage.id)
+    end
+
+    it "etapa de cierre ganado sincroniza status won" do
+      bulk_move(manager, [own_opp.id], won_stage.id)
+      expect(own_opp.reload.status).to eq("won")
+    end
+
+    it "omite las que ya estaban en esa etapa" do
+      bulk_move(manager, [own_opp.id], stage.id)
+      expect(json.dig("data", "moved")).to eq(0)
+      expect(json.dig("data", "skipped").first["reason"]).to eq("ya estaba en esa etapa")
+    end
+
+    it "viewer no puede (403)" do
+      viewer = create(:user, :viewer, tenant: tenant)
+      bulk_move(viewer, [own_opp.id])
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "400 sin ids" do
+      bulk_move(manager, [])
+      expect(response).to have_http_status(:bad_request)
+    end
+  end
+
   describe "POST /api/v1/opportunities/:id/assign" do
     it "solo manager/admin; responde 200 y reasigna owner" do
       post "/api/v1/opportunities/#{foreign_opp.id}/assign",
@@ -321,6 +377,15 @@ RSpec.describe "Api::V1::Opportunities", type: :request do
            params: { pipeline_stage_id: target.id }.to_json,
            headers: auth_headers(consultant)
       expect(response).to have_http_status(:forbidden)
+    end
+
+    it "bulk_move_stage omite opps de referidos (solo lectura) por permiso" do
+      target = pipeline.pipeline_stages.second || stage
+      post "/api/v1/opportunities/bulk_move_stage",
+           params: { ids: [network_opp.id.to_s], pipeline_stage_id: target.id }.to_json,
+           headers: auth_headers(consultant)
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "skipped")).to contain_exactly({ "id" => network_opp.id.to_s, "reason" => "sin permiso" })
     end
 
     it "consultant no puede actualizar opp de referido (403)" do

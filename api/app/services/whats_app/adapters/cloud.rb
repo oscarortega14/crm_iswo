@@ -124,7 +124,7 @@ module WhatsApp
             template:          {
               name:       message.template_name,
               language:   { code: message.template_language },
-              components: template_components(message.template_params)
+              components: template_components(message.template_params, message.template_variable_names)
             }.compact
           }
         elsif message.media_url.present?
@@ -149,11 +149,21 @@ module WhatsApp
         end
       end
 
-      def template_components(params)
+      # Meta migró las plantillas nuevas a variables con nombre
+      # (`{{primer_nombre}}`) en vez del formato posicional clásico
+      # (`{{1}}`). Si `names[i]` viene presente para un valor, se envía
+      # `parameter_name` en ese parámetro; si no, se manda posicional
+      # (compatibilidad con plantillas aprobadas antes de este cambio).
+      def template_components(params, names = [])
         values = Array(params)
         return nil if values.empty?
 
-        [{ type: "body", parameters: values.map { |v| { type: "text", text: v.to_s } } }]
+        names = Array(names)
+        parameters = values.each_with_index.map do |v, i|
+          { type: "text", parameter_name: names[i].presence, text: v.to_s }.compact
+        end
+
+        [{ type: "body", parameters: parameters }]
       end
 
       # Heurística mínima por extensión. Para producción conviene apoyarse

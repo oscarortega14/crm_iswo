@@ -242,6 +242,23 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(response.body.bytesize).to be_positive
     end
 
+    it "incluye la columna stage y la hoja Etapas del pipeline por defecto" do
+      require "roo"
+      pipeline = create(:pipeline, tenant: tenant, is_default: true)
+      create(:pipeline_stage, tenant: tenant, pipeline: pipeline, name: "Calificada")
+
+      get "/api/v1/contacts/import_template", headers: auth_headers(manager)
+
+      file = Tempfile.new(["plantilla", ".xlsx"], binmode: true)
+      file.write(response.body)
+      file.rewind
+      book = Roo::Excelx.new(file.path)
+      expect(book.sheet("Contactos").row(1)).to include("stage")
+      expect(book.sheets).to include("Etapas")
+    ensure
+      file&.close!
+    end
+
     it "consultant puede descargar plantilla (create)" do
       get "/api/v1/contacts/import_template", headers: auth_headers(consultant)
       expect(response).to have_http_status(:ok)
@@ -369,6 +386,107 @@ RSpec.describe "Api::V1::Contacts", type: :request do
     it "consultant no puede descargar (403)" do
       get "/api/v1/contacts/export.csv", headers: auth_headers(consultant)
       expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "POST /api/v1/contacts/backfill_whatsapp_opt_in" do
+    let(:admin) { create(:user, :admin, tenant: tenant) }
+
+    it "dry_run cuenta sin persistir" do
+      wrote_first = create(:contact, tenant: tenant)
+      create(:whatsapp_message, :inbound, :openwa, tenant: tenant, contact: wrote_first)
+      # El create dispara el opt-in automático; lo revertimos para simular
+      # contactos que escribieron ANTES de que existiera ese callback.
+      wrote_first.update_column(:whatsapp_opt_in_at, nil)
+
+      post "/api/v1/contacts/backfill_whatsapp_opt_in?dry_run=true", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "count")).to eq(1)
+      expect(wrote_first.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "marca opt-in a quien ya escribió y no toca a quien nunca escribió" do
+      wrote = create(:contact, tenant: tenant)
+      create(:whatsapp_message, :inbound, :openwa, tenant: tenant, contact: wrote)
+      wrote.update_column(:whatsapp_opt_in_at, nil)
+      never_wrote = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/backfill_whatsapp_opt_in", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "count")).to eq(1)
+      expect(wrote.reload.whatsapp_opted_in?).to be(true)
+      expect(wrote.whatsapp_opt_in_source).to eq("reply_stop_in")
+      expect(never_wrote.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "manager no puede (403, solo admin)" do
+      post "/api/v1/contacts/backfill_whatsapp_opt_in", headers: auth_headers(manager)
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "POST /api/v1/contacts/bulk_whatsapp_opt_in" do
+    let(:admin) { create(:user, :admin, tenant: tenant) }
+
+    it "admin marca opt-in manual a los ids dados" do
+      c1 = create(:contact, tenant: tenant)
+      c2 = create(:contact, tenant: tenant)
+      untouched = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id, c2.id] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "marked")).to eq(2)
+      expect(c1.reload.whatsapp_opted_in?).to be(true)
+      expect(c1.whatsapp_opt_in_source).to eq("manual")
+      expect(c2.reload.whatsapp_opted_in?).to be(true)
+      expect(untouched.reload.whatsapp_opted_in?).to be(false)
+    end
+
+    it "no recuenta ni sobreescribe contactos ya opt-in" do
+      already = create(:contact, tenant: tenant)
+      already.mark_whatsapp_opt_in!(source: "reply_stop_in")
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [already.id] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "marked")).to eq(0)
+      expect(already.reload.whatsapp_opt_in_source).to eq("reply_stop_in")
+    end
+
+    it "manager sí puede (a diferencia del backfill, que es solo admin)" do
+      c1 = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(manager)
+
+      expect(response).to have_http_status(:ok)
+      expect(c1.reload.whatsapp_opted_in?).to be(true)
+    end
+
+    it "consultant no puede (403)" do
+      c1 = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(consultant)
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "400 si no hay ids" do
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:bad_request)
     end
   end
 end
