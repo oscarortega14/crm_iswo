@@ -106,6 +106,7 @@ Rails.application.routes.draw do
           get  "export.xlsx", action: :export_download, defaults: { file_format: "xlsx" }
           post :export
           delete :bulk_destroy       # { ids: [...] }
+          post   :bulk_move_stage    # { ids: [...], pipeline_stage_id }
         end
 
         resources :logs,

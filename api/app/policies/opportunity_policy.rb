@@ -17,6 +17,8 @@ class OpportunityPolicy < ApplicationPolicy
   def destroy?          = admin?
 
   def move_stage?         = update?
+  # Lote: cada oportunidad se valida además con move_stage? (consultor: solo propias).
+  def bulk_move_stage?    = admin? || manager? || consultant?
   def assign?             = manager_or_admin?
   def merge?              = manager_or_admin?
   def recalculate_bant?   = update?

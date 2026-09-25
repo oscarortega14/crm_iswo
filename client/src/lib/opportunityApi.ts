@@ -579,6 +579,23 @@ export async function bulkDeleteOpportunities(ids: string[]): Promise<{ deleted:
   return (response.data as { data: { deleted: number } }).data
 }
 
+export type BulkMoveStageResult = {
+  moved: number
+  skipped: Array<{ id: string; reason: string }>
+  stage_name: string
+}
+
+export async function bulkMoveOpportunitiesStage(
+  ids: string[],
+  stageId: string,
+): Promise<BulkMoveStageResult> {
+  const response = await api.post('/opportunities/bulk_move_stage', {
+    ids,
+    pipeline_stage_id: stageId,
+  })
+  return (response.data as { data: BulkMoveStageResult }).data
+}
+
 export function opportunityListErrorMessage(err: unknown): string {
   return formatRailsError(err, 'Error al cargar oportunidades')
 }

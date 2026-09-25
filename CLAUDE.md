@@ -94,6 +94,12 @@ del pipeline por defecto (sin distinguir mayúsculas/tildes; ganada/perdida
 sincroniza status). Etapa desconocida → primera etapa + `warnings` en la
 respuesta. La plantilla trae la hoja «Etapas» con los valores válidos del tenant.
 
+**Mover en lote:** `POST /opportunities/bulk_move_stage { ids, pipeline_stage_id }`
+(vista Tabla → "Mover a etapa"). Usa `Opportunities::StageMover`, el mismo servicio
+que `move_stage`: admin/manager mueven todo; consultor solo propias (las de la red
+en solo lectura se omiten); viewer 403. Responde `moved` + `skipped[{id, reason}]`.
+Las etapas de cierre piden confirmación en la SPA.
+
 ---
 
 ### Campos personalizados por vertical (RFC F5)
