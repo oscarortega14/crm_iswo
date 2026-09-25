@@ -141,6 +141,23 @@ describe('mapPipelineResource', () => {
     expect(pipeline.stages[1].name).toBe('Calificada')
   })
 
+  it('mapea auto_trigger válido y descarta valores desconocidos', () => {
+    const resource: JsonApiResource = {
+      id: '7',
+      type: 'pipeline',
+      attributes: {
+        name: 'Auto',
+        stages: [
+          { id: '30', name: 'Nueva', position: 0, auto_trigger: null },
+          { id: '31', name: 'Contactada', position: 1, auto_trigger: 'whatsapp_outbound' },
+          { id: '32', name: 'Rara', position: 2, auto_trigger: 'magia' },
+        ],
+      },
+    }
+    const stages = mapPipelineResource(resource).stages
+    expect(stages.map((s) => s.auto_trigger)).toEqual([null, 'whatsapp_outbound', null])
+  })
+
   it('clampea probabilidad a 0–100', () => {
     const resource: JsonApiResource = {
       id: '6',

@@ -65,18 +65,40 @@ de los cambios de etapa o de score BANT.
 
 ---
 
-### Auto-avance a etapa "Calificada" (RFC §6.1)
+### Auto-avance de etapa por eventos (RFC §6.1)
 
-`BantScorer#call_and_persist!` avanza automáticamente la oportunidad a la etapa
-"Calificada" cuando el score BANT supera el umbral por primera vez.
+`Opportunities::StageAutomation` mueve oportunidades según la regla
+`pipeline_stages.auto_rule = { trigger: … }`, configurable por admin en
+**Settings → Pipelines** (un disparador por pipeline; nunca en etapas ganada/perdida).
 
-Condiciones para que el avance ocurra:
-1. La oportunidad tenía `qualified: false` antes del recálculo.
-2. Existe una etapa llamada `"calificada"` (case-insensitive) en el pipeline.
-3. La etapa actual no es terminal (won/lost).
-4. La etapa actual tiene posición menor a "Calificada" (no retrocede).
+| Disparador | Origen |
+|---|---|
+| `whatsapp_outbound` | `WhatsappMessage` saliente con contacto al pasar a `sent/delivered/read` (un 131047 no avanza; avisos de recordatorio al consultor van con `contact: nil` y se ignoran) |
+| `whatsapp_inbound` | `WhatsappMessage` entrante al crearse |
+| `bant_qualified` | `BantScorer#call_and_persist!` cuando el score supera el umbral por primera vez |
 
-El log queda en `opportunity_logs` con `note: "Avance automático por calificación BANT"`.
+Reglas: solo hacia adelante, solo opps `kept` abiertas y en etapa no terminal, y
+**lo manual manda** (si el último `stage_change` fue un retroceso hecho por un
+usuario, no se re-avanza hasta otro movimiento manual). Sin oportunidad en el
+mensaje → aplica a todas las abiertas del contacto.
+
+Log `stage_change` con `note: "Avance automático: <motivo>"`, `changes_data.trigger`
+y notificación in-app al dueño. `Tenants::Onboarder` siembra `Contactada ←
+whatsapp_outbound` y `Calificada ← bant_qualified` (verticales: solo BANT); la
+migración `AddAutoRuleToPipelineStages` precargó `bant_qualified` en las etapas
+"Calificada" existentes, así que el auto-avance BANT ya no depende del nombre.
+
+**Importación con etapa:** `Contacts::SpreadsheetImporter` acepta la columna
+`stage` (alias `etapa`, `estado`, `fase`) y ubica cada oportunidad en esa etapa
+del pipeline por defecto (sin distinguir mayúsculas/tildes; ganada/perdida
+sincroniza status). Etapa desconocida → primera etapa + `warnings` en la
+respuesta. La plantilla trae la hoja «Etapas» con los valores válidos del tenant.
+
+**Mover en lote:** `POST /opportunities/bulk_move_stage { ids, pipeline_stage_id }`
+(vista Tabla → "Mover a etapa"). Usa `Opportunities::StageMover`, el mismo servicio
+que `move_stage`: admin/manager mueven todo; consultor solo propias (las de la red
+en solo lectura se omiten); viewer 403. Responde `moved` + `skipped[{id, reason}]`.
+Las etapas de cierre piden confirmación en la SPA.
 
 ---
 

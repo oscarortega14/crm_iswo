@@ -71,4 +71,33 @@ RSpec.describe PipelineStage, type: :model do
       expect(build(:pipeline_stage, tenant: tenant, pipeline: pipeline)).not_to be_terminal
     end
   end
+
+  describe "auto_rule" do
+    it "acepta un disparador válido y lo expone en #auto_trigger" do
+      stage = create(:pipeline_stage, tenant: tenant, pipeline: pipeline, auto_rule: { trigger: "whatsapp_inbound" })
+      expect(stage.reload.auto_trigger).to eq("whatsapp_inbound")
+    end
+
+    it "normaliza trigger vacío a sin regla" do
+      stage = create(:pipeline_stage, tenant: tenant, pipeline: pipeline, auto_rule: { "trigger" => "" })
+      expect(stage.auto_rule).to eq({})
+      expect(stage.auto_trigger).to be_nil
+    end
+
+    it "rechaza disparadores desconocidos" do
+      stage = build(:pipeline_stage, tenant: tenant, pipeline: pipeline, auto_rule: { "trigger" => "magia" })
+      expect(stage).not_to be_valid
+    end
+
+    it "rechaza reglas en etapas de cierre" do
+      stage = build(:pipeline_stage, :won, tenant: tenant, pipeline: pipeline, auto_rule: { "trigger" => "bant_qualified" })
+      expect(stage).not_to be_valid
+    end
+
+    it "no permite el mismo disparador en dos etapas del pipeline" do
+      create(:pipeline_stage, tenant: tenant, pipeline: pipeline, auto_rule: { "trigger" => "bant_qualified" })
+      dup = build(:pipeline_stage, tenant: tenant, pipeline: pipeline, auto_rule: { "trigger" => "bant_qualified" })
+      expect(dup).not_to be_valid
+    end
+  end
 end

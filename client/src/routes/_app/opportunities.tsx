@@ -1,15 +1,33 @@
 import { createFileRoute, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { LayoutGrid, Table as TableIcon, Plus, Search, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  LayoutGrid,
+  Table as TableIcon,
+  Plus,
+  Search,
+  RefreshCw,
+  Trash2,
+  ArrowRightLeft,
+  ChevronDown,
+} from 'lucide-react'
 import { z } from 'zod'
 import {
   invalidateContactSegmentMetrics,
+  invalidateNotificationsQueries,
   queryKeys,
 } from '@/lib/queryClient'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { OpportunitiesFiltersPopover } from '@/components/opportunities/OpportunitiesFiltersPopover'
 import { KanbanBoard } from '@/components/opportunities/KanbanBoard'
 import { OpportunitiesTable } from '@/components/opportunities/OpportunitiesTable'
@@ -31,6 +49,7 @@ import {
 import { fetchContactDetail } from '@/lib/contactApi'
 import {
   bulkDeleteOpportunities,
+  bulkMoveOpportunitiesStage,
   fetchOpportunities,
   jsonApiPrimaryList,
   mapPipelineResource,
@@ -47,6 +66,7 @@ import {
 import { OpportunityOwnershipToolbar } from '@/components/opportunities/OpportunityOwnershipToolbar'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'sonner'
+import type { Opportunity, PipelineStage } from '@/types'
 
 const opportunitiesSearchSchema = z.object({
   view: z.enum(['kanban', 'table']).optional().default('kanban'),
@@ -82,6 +102,8 @@ function OpportunitiesPage() {
   const userRole = user?.role
   const canCreateOpportunity = userRole !== 'viewer'
   const canDeleteOpportunities = userRole === 'admin'
+  // Mover en lote: mismas reglas que arrastrar en el Kanban (viewer no; consultor solo propias).
+  const canBulkMove = userRole === 'admin' || userRole === 'manager' || userRole === 'consultant'
   const tenant = useAuthStore((s) => s.tenant)
   const hasOpportunitiesModule = tenantHasModule(tenant, 'opportunities')
   const showOwnershipToolbar =
@@ -94,6 +116,7 @@ function OpportunitiesPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [confirmMoveStage, setConfirmMoveStage] = useState<PipelineStage | null>(null)
   const contactFilterId = search.contact
   const landingFilterId = search.landing
 
@@ -351,6 +374,36 @@ function OpportunitiesPage() {
       toast.error(formatRailsError(err, 'No se pudieron eliminar las oportunidades'))
     },
   })
+
+  const bulkMoveMutation = useMutation({
+    mutationFn: (stage: PipelineStage) => bulkMoveOpportunitiesStage(Array.from(selectedIds), stage.id),
+    onSuccess: async (result) => {
+      const skipped = result.skipped.length
+      const msg = `${result.moved} oportunidad(es) movida(s) a ${result.stage_name}`
+      if (skipped > 0) toast.warning(`${msg} · ${skipped} omitida(s) (sin permiso o ya estaban ahí)`)
+      else toast.success(msg)
+      setSelectedIds(new Set())
+      setConfirmMoveStage(null)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.opportunities.all })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      await invalidateContactSegmentMetrics(queryClient)
+      void invalidateNotificationsQueries(queryClient)
+    },
+    onError: (err: unknown) => {
+      toast.error(formatRailsError(err, 'No se pudieron mover las oportunidades'))
+    },
+  })
+
+  const canMoveOpportunity = (opp: Opportunity) => {
+    if (userRole === 'admin' || userRole === 'manager') return true
+    if (userRole !== 'consultant' || opp.network_read_only) return false
+    return String(opp.owner_id) === String(user?.id ?? '')
+  }
+
+  const handleBulkMove = (stage: PipelineStage) => {
+    if (stage.is_closed_won || stage.is_closed_lost) setConfirmMoveStage(stage)
+    else bulkMoveMutation.mutate(stage)
+  }
 
   const setOpportunitySelected = (id: string, selected: boolean) => {
     setSelectedIds((prev) => {
@@ -612,30 +665,75 @@ function OpportunitiesPage() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 lg:p-6">
-            {selectedIds.size > 0 && canDeleteOpportunities && (
-              <div className="mb-3 flex shrink-0 items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2">
+            {selectedIds.size > 0 && (
+              <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-4 py-2">
                 <span className="text-sm font-medium">
                   {selectedIds.size} oportunidad(es) seleccionada(s)
                 </span>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="ml-auto gap-1.5"
-                  onClick={() => setConfirmBulkDelete(true)}
-                >
-                  <Trash2 className="size-3.5" />
-                  Eliminar seleccionadas
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                  Cancelar
-                </Button>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  {canBulkMove && (displayPipeline?.stages?.length ?? 0) > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" className="gap-1.5" disabled={bulkMoveMutation.isPending}>
+                          <ArrowRightLeft className="size-3.5" />
+                          Mover a etapa
+                          <ChevronDown className="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                        <DropdownMenuLabel>{displayPipeline?.name}</DropdownMenuLabel>
+                        {displayPipeline?.stages
+                          ?.filter((st) => !st.is_closed_won && !st.is_closed_lost)
+                          .map((st) => (
+                            <DropdownMenuItem key={st.id} onSelect={() => handleBulkMove(st)}>
+                              <span
+                                className="mr-2 size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: st.color || '#94A3B8' }}
+                              />
+                              {st.name}
+                            </DropdownMenuItem>
+                          ))}
+                        <DropdownMenuSeparator />
+                        {displayPipeline?.stages
+                          ?.filter((st) => st.is_closed_won || st.is_closed_lost)
+                          .map((st) => (
+                            <DropdownMenuItem key={st.id} onSelect={() => handleBulkMove(st)}>
+                              <span
+                                className="mr-2 size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: st.color || '#94A3B8' }}
+                              />
+                              {st.name}
+                              <span className="ml-auto pl-3 text-xs text-muted-foreground">
+                                {st.is_closed_won ? 'cierre ganado' : 'cierre perdido'}
+                              </span>
+                            </DropdownMenuItem>
+                          ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {canDeleteOpportunities && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="gap-1.5"
+                      onClick={() => setConfirmBulkDelete(true)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      Eliminar
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    Cancelar
+                  </Button>
+                </div>
               </div>
             )}
             <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/50">
               <OpportunitiesTable
                 opportunities={filteredOpportunities}
                 onSelectOpportunity={handleSelectOpportunity}
-                canBulkDelete={canDeleteOpportunities}
+                selectable={canDeleteOpportunities || canBulkMove}
+                isRowSelectable={canDeleteOpportunities ? undefined : canMoveOpportunity}
                 selectedIds={selectedIds}
                 onSelectionChange={setOpportunitySelected}
                 onSelectAllOnPage={setAllOnPageSelected}
@@ -668,6 +766,36 @@ function OpportunitiesPage() {
           }
         }}
       />
+
+      <AlertDialog
+        open={confirmMoveStage != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmMoveStage(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Mover {selectedIds.size} oportunidad(es) a «{confirmMoveStage?.name}»
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Es una etapa de cierre: quedarán marcadas como{' '}
+              {confirmMoveStage?.is_closed_won ? 'ganadas' : 'perdidas'}. Puedes revertirlo moviéndolas
+              de nuevo a otra etapa.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmMoveStage) bulkMoveMutation.mutate(confirmMoveStage)
+              }}
+            >
+              Mover {selectedIds.size} oportunidad(es)
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
         <AlertDialogContent>

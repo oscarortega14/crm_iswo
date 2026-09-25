@@ -20,7 +20,8 @@ class PipelineSerializer < ApplicationSerializer
         probability:     s.probability,
         is_closed_won:   s.closed_won,
         is_closed_lost:  s.closed_lost,
-        color:           s.color
+        color:           s.color,
+        auto_trigger:    s.auto_trigger
       }
     end
   end

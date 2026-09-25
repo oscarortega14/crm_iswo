@@ -143,6 +143,27 @@ RSpec.describe Contact, type: :model do
     end
   end
 
+  describe "#discard (soft-delete en cascada)" do
+    it "descarta también las oportunidades del contacto" do
+      contact = create(:contact, tenant: tenant)
+      opp = create(:opportunity, tenant: tenant, contact: contact)
+
+      contact.discard
+
+      expect(opp.reload).to be_discarded
+      expect(Opportunity.kept).not_to include(opp)
+    end
+
+    it "discard_all en lote descarta las oportunidades de cada contacto" do
+      contacts = create_list(:contact, 2, tenant: tenant)
+      opps = contacts.map { |c| create(:opportunity, tenant: tenant, contact: c) }
+
+      Contact.where(id: contacts.map(&:id)).discard_all
+
+      expect(opps.map { |o| o.reload.discarded? }).to all(be(true))
+    end
+  end
+
   describe ".opted_in_for_whatsapp scope" do
     it "solo trae contactos con whatsapp_opt_in_at presente" do
       opted_in = create(:contact, tenant: tenant, whatsapp_opt_in_at: Time.current)

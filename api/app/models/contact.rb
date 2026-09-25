@@ -70,6 +70,10 @@ class Contact < ApplicationRecord
 
   # ---- Callbacks ------------------------------------------------------------
   before_validation :normalize_email_and_phone
+  # Soft-delete en cascada: `dependent: :destroy` solo aplica al destroy real,
+  # así que sin esto las oportunidades de un contacto descartado siguen
+  # contando en /opportunities, kanban y dashboard.
+  after_discard :discard_opportunities
 
   # ---- Scopes ---------------------------------------------------------------
   scope :persons,   -> { where(kind: "person") }
@@ -135,6 +139,10 @@ class Contact < ApplicationRecord
   end
 
   private
+
+  def discard_opportunities
+    opportunities.kept.discard_all
+  end
 
   def normalize_email_and_phone
     self.email = email&.downcase&.strip

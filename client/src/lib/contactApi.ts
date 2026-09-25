@@ -315,6 +315,8 @@ export type ContactImportResult = {
   created_count: number
   skipped_count: number
   errors: Array<{ row: number; message: string }>
+  /** Filas importadas con ajuste (p.ej. etapa desconocida → primera etapa). */
+  warnings?: Array<{ row: number; message: string }>
 }
 
 export async function downloadContactImportTemplate(): Promise<void> {

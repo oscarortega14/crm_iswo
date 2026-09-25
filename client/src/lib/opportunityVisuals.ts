@@ -1,4 +1,16 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
+import type { StageAutoTrigger } from '@/types'
+
+/** Disparadores de auto-avance de etapa (espejo de Opportunities::StageAutomation::TRIGGERS). */
+export const STAGE_AUTO_TRIGGER_LABELS: Record<StageAutoTrigger, string> = {
+  whatsapp_outbound: 'Se envió un WhatsApp al lead',
+  whatsapp_inbound: 'El lead escribió por WhatsApp',
+  bant_qualified: 'Supera el umbral BANT',
+}
+
+export function isStageAutoTrigger(value: unknown): value is StageAutoTrigger {
+  return typeof value === 'string' && value in STAGE_AUTO_TRIGGER_LABELS
+}
 
 /** Emoji por etapa (nombre de pipeline), en lugar del texto largo en tarjetas. */
 const STAGE_EMOJI_RULES: { match: RegExp; emoji: string }[] = [

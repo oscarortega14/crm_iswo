@@ -35,6 +35,9 @@ RSpec.describe "Api::V1::Webhooks::MetaAds", type: :request do
   end
 
   describe "POST /api/v1/webhooks/meta" do
+    # Sin firma por default: api/.env (dotenv) puede traer META_APP_SECRET real.
+    before { ENV.delete("META_APP_SECRET") }
+
     let(:payload) do
       {
         entry: [

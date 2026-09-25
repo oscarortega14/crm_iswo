@@ -15,12 +15,17 @@ module Contacts
   #   position / cargo, city / ciudad, country / pais,
   #   document_id / cc / cedula / nit,
   #   kind / tipo (person|company|persona|empresa),
-  #   notes / notas / observaciones
+  #   notes / notas / observaciones,
+  #   stage / etapa / estado / fase → etapa del pipeline por defecto (nombre
+  #     sin distinguir mayúsculas ni tildes; si no existe, primera etapa + aviso)
   # ==========================================================================
   class SpreadsheetImporter
     MAX_ROWS = 2000
 
-    Result = Struct.new(:created_count, :skipped_count, :errors, keyword_init: true)
+    # warnings: filas importadas con algún ajuste (p.ej. etapa desconocida).
+    Result = Struct.new(:created_count, :skipped_count, :errors, :warnings, keyword_init: true) do
+      def warnings = self[:warnings] || []
+    end
 
     def initialize(tenant:, user:, io:, filename: nil)
       @tenant = tenant
@@ -34,6 +39,7 @@ module Contacts
       return early if early.is_a?(Result)
 
       errors = []
+      warnings = []
       created_count = 0
       skipped_count = 0
 
@@ -48,15 +54,18 @@ module Contacts
       ActsAsTenant.with_tenant(@tenant) do
         rows.each_with_index do |row, idx|
           line_no = idx + 2 # cabecera = 1
-          attrs = build_attrs(normalize_row(row))
+          h = normalize_row(row)
+          attrs = build_attrs(h)
           if attrs.nil?
             skipped_count += 1
             next
           end
 
+          stage = resolve_stage(h["stage"], line_no, warnings)
           contact = @tenant.contacts.new(attrs.merge(owner_user: @user))
           contact.save!
-          Contacts::ProspectOpportunityCreator.call(contact: contact, actor: @user)
+          Contacts::ProspectOpportunityCreator.call(contact: contact, actor: @user, stage: stage,
+                                                    origin: "contact_import")
           created_count += 1
         rescue ActiveRecord::RecordInvalid => e
           errors << { row: line_no, message: e.record.errors.full_messages.join(", ") }
@@ -65,10 +74,45 @@ module Contacts
         end
       end
 
-      Result.new(created_count: created_count, skipped_count: skipped_count, errors: errors)
+      Result.new(created_count: created_count, skipped_count: skipped_count, errors: errors, warnings: warnings)
+    end
+
+    # Etapas del pipeline por defecto (mismo que usa ProspectOpportunityCreator).
+    def self.default_pipeline(tenant)
+      tenant.pipelines.find_by(is_default: true) || tenant.pipelines.first
+    end
+
+    def self.normalize_stage_name(name)
+      I18n.transliterate(name.to_s).downcase.squish
     end
 
     private
+
+    def default_pipeline
+      return @default_pipeline if defined?(@default_pipeline)
+
+      @default_pipeline = self.class.default_pipeline(@tenant)
+    end
+
+    def stages_by_name
+      @stages_by_name ||= (default_pipeline&.pipeline_stages&.where(discarded_at: nil)&.order(:position) || [])
+                          .index_by { |st| self.class.normalize_stage_name(st.name) }
+    end
+
+    # nil → primera etapa (la decide ProspectOpportunityCreator).
+    def resolve_stage(raw, line_no, warnings)
+      return nil if raw.blank?
+
+      stage = stages_by_name[self.class.normalize_stage_name(raw)]
+      return stage if stage
+
+      first = stages_by_name.values.first&.name || "la primera etapa"
+      warnings << {
+        row:     line_no,
+        message: "etapa «#{raw}» no existe en «#{default_pipeline&.name}»; quedó en «#{first}»"
+      }
+      nil
+    end
 
     # @return [Array, Result|nil] rows array or early Result error
     def load_rows
@@ -163,7 +207,7 @@ module Contacts
 
     KNOWN_IMPORT_KEYS = %w[
       first_name last_name full_name email phone company position
-      city country kind notes document_id
+      city country kind notes document_id stage
     ].freeze
 
     # Devuelve el índice (1-based) de la fila con más cabeceras reconocidas.
@@ -282,6 +326,8 @@ module Contacts
            "observación" then "notes"
       when "cc", "cedula", "cédula", "nit", "documento",
            "document_id", "identificacion", "identificación" then "document_id"
+      when "etapa", "stage", "estado", "fase", "etapa del pipeline",
+           "etapa_pipeline", "pipeline_stage" then "stage"
       else
         s.gsub(/\s+/, "_")
       end

@@ -92,10 +92,13 @@ RSpec.describe Opportunities::BantScorer do
     end
   end
 
-  describe "#call_and_persist! — auto-avance a etapa Calificada" do
+  describe "#call_and_persist! — auto-avance a la etapa con disparador bant_qualified" do
     let(:pipeline) { create(:pipeline, tenant: tenant) }
     let!(:stage_nueva)      { create(:pipeline_stage, pipeline: pipeline, tenant: tenant, name: "Nueva",      position: 0, probability: 10) }
-    let!(:stage_calificada) { create(:pipeline_stage, pipeline: pipeline, tenant: tenant, name: "Calificada", position: 2, probability: 50) }
+    let!(:stage_calificada) do
+      create(:pipeline_stage, pipeline: pipeline, tenant: tenant, name: "Calificada", position: 2, probability: 50,
+             auto_rule: { "trigger" => "bant_qualified" })
+    end
     let!(:stage_propuesta)  { create(:pipeline_stage, pipeline: pipeline, tenant: tenant, name: "Propuesta",  position: 3, probability: 75) }
     let!(:stage_ganada)     { create(:pipeline_stage, pipeline: pipeline, tenant: tenant, name: "Ganada",     position: 4, probability: 100, closed_won: true) }
 
@@ -127,8 +130,8 @@ RSpec.describe Opportunities::BantScorer do
         .not_to change { opp.reload.pipeline_stage_id }
     end
 
-    it "NO avanza si no existe etapa llamada Calificada en el pipeline" do
-      stage_calificada.update!(name: "En proceso")
+    it "NO avanza si ninguna etapa tiene el disparador bant_qualified" do
+      stage_calificada.update!(auto_rule: {})
       expect { described_class.new(opp).call_and_persist! }
         .not_to change { opp.reload.pipeline_stage_id }
     end

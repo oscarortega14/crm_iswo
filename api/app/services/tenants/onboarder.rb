@@ -27,8 +27,10 @@ module Tenants
 
     DEFAULT_PIPELINE_STAGES = [
       { name: "Nueva",      position: 0, probability: 10,  color: "#94A3B8" },
-      { name: "Contactada", position: 1, probability: 25,  color: "#60A5FA" },
-      { name: "Calificada", position: 2, probability: 50,  color: "#22C55E" },
+      { name: "Contactada", position: 1, probability: 25,  color: "#60A5FA",
+        auto_rule: { "trigger" => "whatsapp_outbound" } },
+      { name: "Calificada", position: 2, probability: 50,  color: "#22C55E",
+        auto_rule: { "trigger" => "bant_qualified" } },
       { name: "Propuesta",  position: 3, probability: 75,  color: "#F59E0B" },
       { name: "Ganada",     position: 4, probability: 100, color: "#16A34A", closed_won:  true },
       { name: "Perdida",    position: 5, probability: 0,   color: "#DC2626", closed_lost: true }
@@ -204,10 +206,19 @@ module Tenants
       )
 
       stages.each do |attrs|
-        pipeline.pipeline_stages.create!(attrs.merge(tenant: tenant))
+        pipeline.pipeline_stages.create!(with_default_auto_rule(attrs).merge(tenant: tenant))
       end
 
       pipeline
+    end
+
+    # Las verticales no declaran reglas: "Calificada" recibe el auto-avance BANT
+    # (mismo comportamiento que antes de StageAutomation).
+    def with_default_auto_rule(attrs)
+      return attrs if attrs.key?(:auto_rule)
+      return attrs unless attrs[:name].to_s.casecmp?("calificada")
+
+      attrs.merge(auto_rule: { "trigger" => "bant_qualified" })
     end
 
     def create_lead_sources!(tenant)

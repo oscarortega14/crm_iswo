@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import api, { formatRailsError } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
+import { isStageAutoTrigger } from '@/lib/opportunityVisuals'
 import type {
   Opportunity,
   OpportunityStatus,
@@ -89,6 +90,7 @@ function normalizeEmbeddedStage(s: Record<string, unknown>, index: number): Pipe
     is_closed_won: Boolean(s.is_closed_won ?? s.closed_won),
     is_closed_lost: Boolean(s.is_closed_lost ?? s.closed_lost),
     color: s.color != null ? String(s.color) : undefined,
+    auto_trigger: isStageAutoTrigger(s.auto_trigger) ? s.auto_trigger : null,
   }
 }
 
@@ -575,6 +577,23 @@ export function triggerBlobDownload(blob: Blob, filename: string) {
 export async function bulkDeleteOpportunities(ids: string[]): Promise<{ deleted: number }> {
   const response = await api.delete('/opportunities/bulk_destroy', { data: { ids } })
   return (response.data as { data: { deleted: number } }).data
+}
+
+export type BulkMoveStageResult = {
+  moved: number
+  skipped: Array<{ id: string; reason: string }>
+  stage_name: string
+}
+
+export async function bulkMoveOpportunitiesStage(
+  ids: string[],
+  stageId: string,
+): Promise<BulkMoveStageResult> {
+  const response = await api.post('/opportunities/bulk_move_stage', {
+    ids,
+    pipeline_stage_id: stageId,
+  })
+  return (response.data as { data: BulkMoveStageResult }).data
 }
 
 export function opportunityListErrorMessage(err: unknown): string {
