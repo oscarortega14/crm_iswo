@@ -23,6 +23,10 @@ export interface AiAgentConfig {
   openaiConfigured: boolean
   model: string
   defaults: { tone: string; qualification: string; handoff_rules: string }
+  /** Chats donde el asistente está en pausa (los atiende un asesor). */
+  pausedChats: number
+  /** Chats donde un asesor escribió en los últimos 7 días. */
+  humanChats: number
 }
 
 function mapConfig(d: Record<string, unknown>): AiAgentConfig {
@@ -38,6 +42,8 @@ function mapConfig(d: Record<string, unknown>): AiAgentConfig {
     openaiConfigured: d.openai_configured === true,
     model: String(d.model ?? ''),
     defaults: (d.defaults ?? { tone: '', qualification: '', handoff_rules: '' }) as AiAgentConfig['defaults'],
+    pausedChats: Number(d.paused_chats ?? 0),
+    humanChats: Number(d.human_chats ?? 0),
   }
 }
 
@@ -56,9 +62,18 @@ export type AiAgentInput = {
   handoff_rules: string
 }
 
-export async function updateAiAgentConfig(body: Partial<AiAgentInput>): Promise<AiAgentConfig> {
-  const res = await api.patch('/ai_agent', { ai_agent: body })
-  return mapConfig(res.data.data ?? {})
+export async function updateAiAgentConfig(
+  body: Partial<AiAgentInput>,
+  options: { pauseHumanChats?: boolean } = {},
+): Promise<{ config: AiAgentConfig; pausedNow: number }> {
+  const res = await api.patch('/ai_agent', { ai_agent: body, pause_human_chats: options.pauseHumanChats })
+  return { config: mapConfig(res.data.data ?? {}), pausedNow: Number(res.data.meta?.paused_now ?? 0) }
+}
+
+/** Pausar (paused: true) o reanudar el asistente en todos los chats. */
+export async function setAllChatsPaused(paused: boolean): Promise<{ config: AiAgentConfig; changed: number }> {
+  const res = await api.post('/ai_agent/chats', { paused })
+  return { config: mapConfig(res.data.data ?? {}), changed: Number(res.data.meta?.changed ?? 0) }
 }
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string }

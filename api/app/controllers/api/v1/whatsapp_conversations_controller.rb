@@ -46,7 +46,8 @@ module Api
         render_collection(
           conversations,
           with:   WhatsappConversationSerializer,
-          params: { unread_counts: unread_counts, awaiting_ids: awaiting_ids, current_user: current_user }
+          params: { unread_counts: unread_counts, awaiting_ids: awaiting_ids, current_user: current_user },
+          meta:   { assistant_active: current_tenant.ai_agent_config.active? }
         )
       end
 

@@ -210,6 +210,7 @@ Rails.application.routes.draw do
       resource :ai_agent, only: %i[show update], controller: "ai_agent" do
         post :test
         get  :activity
+        post :chats # { paused: true|false } — pausar / reanudar en todos los chats
       end
 
       # ---- Email marketing (AWS SES, dominio propio del tenant) ---------------

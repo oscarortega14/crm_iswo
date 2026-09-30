@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, Bot, RotateCcw, Send, Sparkles } from 'lucide-react'
+import { AlertTriangle, Bot, BotOff, RotateCcw, Send, Sparkles } from 'lucide-react'
 import { requireSettingsRole } from '@/lib/authGuards'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +12,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { formatRailsError } from '@/lib/api'
 import { cn, formatRelativeTime } from '@/lib/utils'
@@ -22,6 +33,7 @@ import {
   estimateCostUsd,
   fetchAiAgentActivity,
   fetchAiAgentConfig,
+  setAllChatsPaused,
   testAiAgent,
   updateAiAgentConfig,
   type AiAgentConfig,
@@ -71,6 +83,7 @@ function AiAgentSettingsPage() {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <ConfigForm config={config} canEdit={canEdit} />
           <div className="space-y-6">
+            <PausedChatsCard config={config} canEdit={canEdit} />
             {canEdit && <TestChat disabled={!config.openaiConfigured} />}
             <ActivityCard />
           </div>
@@ -96,15 +109,24 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
 
   const set = <K extends keyof AiAgentInput>(key: K, value: AiAgentInput[K]) => setForm((f) => ({ ...f, [key]: value }))
 
+  const [confirmOn, setConfirmOn] = useState(false)
+  const [pauseHumanChats, setPauseHumanChats] = useState(true)
+
   const saveMutation = useMutation({
-    mutationFn: (body: Partial<AiAgentInput>) => updateAiAgentConfig(body),
-    onSuccess: (next, body) => {
+    mutationFn: ({ body, pauseHuman }: { body: Partial<AiAgentInput>; pauseHuman?: boolean }) =>
+      updateAiAgentConfig(body, { pauseHumanChats: pauseHuman }),
+    onSuccess: ({ config: next, pausedNow }, { body }) => {
       queryClient.setQueryData(aiAgentQueryKeys.config(), next)
       if (body.enabled !== undefined && Object.keys(body).length === 1) {
-        toast.success(next.enabled ? 'Asistente activado: ya responde por WhatsApp' : 'Asistente desactivado')
+        toast.success(
+          next.enabled
+            ? `Asistente encendido${pausedNow > 0 ? `: no responderá en ${pausedNow} chat(s) que ya atiende un asesor` : ''}`
+            : 'Asistente apagado',
+        )
       } else {
         toast.success('Configuración guardada')
       }
+      setConfirmOn(false)
     },
     onError: (err) => toast.error(formatRailsError(err, 'No se pudo guardar')),
   })
@@ -132,7 +154,14 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
             <Switch
               checked={config.enabled}
               disabled={!canEdit || saveMutation.isPending || (!config.enabled && dirty)}
-              onCheckedChange={(v) => saveMutation.mutate({ enabled: v })}
+              onCheckedChange={(v) => {
+                if (v) {
+                  setPauseHumanChats(true)
+                  setConfirmOn(true)
+                } else {
+                  saveMutation.mutate({ body: { enabled: false } })
+                }
+              }}
               aria-label="Activar asistente"
             />
             {config.enabled ? 'Activado' : 'Apagado'}
@@ -207,7 +236,7 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
             <Button
               onClick={() => {
                 const { enabled: _enabled, ...rest } = form
-                saveMutation.mutate(rest)
+                saveMutation.mutate({ body: rest })
               }}
               disabled={!dirty || saveMutation.isPending}
             >
@@ -219,6 +248,117 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
           <p className="text-xs text-muted-foreground">Solo un administrador puede cambiar el asistente.</p>
         )}
       </CardContent>
+
+      <AlertDialog open={confirmOn} onOpenChange={(open) => { if (!saveMutation.isPending) setConfirmOn(open) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Encender el asistente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Desde ahora responderá automáticamente los mensajes de WhatsApp de todos los chats, salvo los que estén en
+              pausa.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              checked={pauseHumanChats}
+              onCheckedChange={(v) => setPauseHumanChats(v === true)}
+              className="mt-0.5"
+            />
+            <span>
+              No responder en los chats donde un asesor ya está conversando (escribió en los últimos 7 días)
+              {config.humanChats > 0 ? ` — ${config.humanChats} chat(s)` : ''}. <b>Recomendado.</b>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saveMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saveMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                saveMutation.mutate({ body: { enabled: true }, pauseHuman: pauseHumanChats })
+              }}
+            >
+              {saveMutation.isPending && <Spinner className="mr-2" />}
+              Encender
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  )
+}
+
+/** Chats en pausa (los atiende un asesor) y pausar / reanudar en bloque. */
+function PausedChatsCard({ config, canEdit }: { config: AiAgentConfig; canEdit: boolean }) {
+  const queryClient = useQueryClient()
+  const [confirm, setConfirm] = useState<'pause' | 'resume' | null>(null)
+
+  const bulkMutation = useMutation({
+    mutationFn: (paused: boolean) => setAllChatsPaused(paused),
+    onSuccess: ({ config: next, changed }, paused) => {
+      queryClient.setQueryData(aiAgentQueryKeys.config(), next)
+      void queryClient.invalidateQueries({ queryKey: ['whatsappConversations'] })
+      toast.success(
+        paused
+          ? `Asistente en pausa en ${changed} chat(s): solo responderá en chats nuevos`
+          : `El asistente vuelve a responder en ${changed} chat(s)`,
+      )
+      setConfirm(null)
+    },
+    onError: (err) => toast.error(formatRailsError(err, 'No se pudo cambiar los chats')),
+  })
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <BotOff className="size-4" />
+          Chats en pausa: {config.pausedChats}
+        </CardTitle>
+        <CardDescription>
+          En estos chats el asistente no responde porque los atiende un asesor. Un chat se pausa solo cuando un
+          asesor escribe o cuando el asistente lo pasa a una persona; también se puede pausar o reanudar desde cada
+          chat en la bandeja.
+        </CardDescription>
+      </CardHeader>
+      {canEdit && (
+        <CardContent className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" className="flex-1" onClick={() => setConfirm('resume')} disabled={config.pausedChats === 0}>
+            <Bot className="mr-2 size-4" />
+            Reanudar todos
+          </Button>
+          <Button variant="outline" className="flex-1" onClick={() => setConfirm('pause')}>
+            <BotOff className="mr-2 size-4" />
+            Pausar todos
+          </Button>
+        </CardContent>
+      )}
+
+      <AlertDialog open={confirm !== null} onOpenChange={(open) => { if (!open && !bulkMutation.isPending) setConfirm(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm === 'pause' ? '¿Pausar el asistente en todos los chats?' : '¿Reanudar el asistente en todos los chats?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm === 'pause'
+                ? 'El asistente dejará de responder en todos los chats que existen hoy. Solo atenderá a quienes escriban por primera vez.'
+                : `El asistente volverá a responder en ${config.pausedChats} chat(s), incluidos los que atiende un asesor.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={bulkMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                bulkMutation.mutate(confirm === 'pause')
+              }}
+            >
+              {bulkMutation.isPending && <Spinner className="mr-2" />}
+              {confirm === 'pause' ? 'Pausar todos' : 'Reanudar todos'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

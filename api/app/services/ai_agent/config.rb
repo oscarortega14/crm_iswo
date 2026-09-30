@@ -67,12 +67,37 @@ module AiAgent
       tenant.update!(settings: (tenant.settings || {}).merge("ai_agent" => next_config))
     end
 
+    HUMAN_CHAT_WINDOW = 7.days
+
+    # Chats con WhatsApp donde el asistente no responde porque un asesor los atiende.
+    def paused_chats
+      chat_contacts.where.not(whatsapp_automation_paused_at: nil)
+    end
+
+    # Chats donde una persona del equipo escribió en los últimos días.
+    def human_chats(since: HUMAN_CHAT_WINDOW.ago)
+      tenant.contacts.kept.where(
+        id: tenant.whatsapp_messages.direction_out.where(automated: false, created_at: since..).select(:contact_id)
+      )
+    end
+
+    # Pausa (paused: true) o reanuda el asistente en bloque. Devuelve cuántos chats cambió.
+    def set_paused!(scope, paused:)
+      target = paused ? scope.where(whatsapp_automation_paused_at: nil) : scope.where.not(whatsapp_automation_paused_at: nil)
+      target.update_all(whatsapp_automation_paused_at: paused ? Time.current : nil, updated_at: Time.current)
+    end
+
+    def chat_contacts
+      tenant.contacts.kept.where(id: tenant.whatsapp_messages.select(:contact_id))
+    end
+
     def as_json(*)
       {
         "enabled" => enabled?, "active" => active?, "assistant_name" => assistant_name,
         "business_info" => business_info, "faq" => faq, "tone" => tone, "qualification" => qualification,
         "handoff_rules" => handoff_rules, "openai_configured" => OpenaiClient.configured?,
-        "model" => OpenaiClient.model_name, "defaults" => DEFAULTS
+        "model" => OpenaiClient.model_name, "defaults" => DEFAULTS,
+        "paused_chats" => paused_chats.count, "human_chats" => human_chats.count
       }
     end
   end

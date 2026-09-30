@@ -40,6 +40,8 @@ export type ConversationsPagination = {
 export type ConversationsListResult = {
   conversations: ConversationRow[]
   pagination?: ConversationsPagination
+  /** El asistente IA está encendido y puede responder (config general del tenant). */
+  assistantActive: boolean
 }
 
 export function mapConversationResource(resource: JsonApiResource): ConversationRow | null {
@@ -81,7 +83,8 @@ export async function fetchConversations(filters: ConversationsFilters = {}): Pr
     .filter((row): row is ConversationRow => row !== null)
   const pagination = (response.data as { meta?: { pagination?: ConversationsPagination } })?.meta?.pagination
 
-  return { conversations, pagination }
+  const assistantActive = (response.data as { meta?: { assistant_active?: boolean } })?.meta?.assistant_active === true
+  return { conversations, pagination, assistantActive }
 }
 
 export type ConversationStats = {

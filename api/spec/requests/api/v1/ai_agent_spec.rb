@@ -63,4 +63,50 @@ RSpec.describe "Api::V1::AiAgent", type: :request do
     expect(json["data"].size).to eq(2)
     expect(json.dig("meta", "last_30_days")).to include("replies" => 2, "handoffs" => 1, "input_tokens" => 1000)
   end
+
+  describe "activación y pausas en bloque" do
+    let(:human)  { create(:contact, tenant: tenant) }
+    let(:auto)   { create(:contact, tenant: tenant) }
+    let(:quiet)  { create(:contact, tenant: tenant) }
+
+    before do
+      tenant.ai_agent_config.update!(business_info: "ISO 9001")
+      create(:whatsapp_message, tenant: tenant, contact: human, direction: "in", body: "hola")
+      create(:whatsapp_message, tenant: tenant, contact: auto, direction: "out", automated: true, body: "campaña")
+      create(:whatsapp_message, tenant: tenant, contact: quiet, direction: "in", body: "info")
+      # la respuesta del asesor pausa ese chat al crearse; se reanuda para simular chats de antes del asistente
+      create(:whatsapp_message, tenant: tenant, contact: human, direction: "out", body: "Hola, soy Paula")
+      human.update_columns(whatsapp_automation_paused_at: nil)
+    end
+
+    it "al encender con pause_human_chats pausa solo los chats que lleva un asesor" do
+      patch "/api/v1/ai_agent", headers: auth_headers(admin),
+            params: { ai_agent: { enabled: true }, pause_human_chats: true }.to_json
+      expect(json.dig("meta", "paused_now")).to eq(1)
+      expect(human.reload.whatsapp_automation_paused?).to be(true)
+      expect([ auto, quiet ].map { |c| c.reload.whatsapp_automation_paused? }).to all(be(false))
+      expect(json.dig("data", "paused_chats")).to eq(1)
+    end
+
+    it "pausar todos y reanudar todos (admin); manager no" do
+      post "/api/v1/ai_agent/chats", headers: auth_headers(admin), params: { paused: true }.to_json
+      expect(json.dig("meta", "changed")).to eq(3)
+      expect(json.dig("data", "paused_chats")).to eq(3)
+
+      post "/api/v1/ai_agent/chats", headers: auth_headers(admin), params: { paused: false }.to_json
+      expect(json.dig("data", "paused_chats")).to eq(0)
+
+      post "/api/v1/ai_agent/chats", headers: auth_headers(manager), params: { paused: true }.to_json
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "la bandeja informa si el asistente está respondiendo" do
+      get "/api/v1/whatsapp_conversations", headers: auth_headers(consultant)
+      expect(json.dig("meta", "assistant_active")).to be(false)
+
+      tenant.ai_agent_config.update!(enabled: true)
+      get "/api/v1/whatsapp_conversations", headers: auth_headers(consultant)
+      expect(json.dig("meta", "assistant_active")).to be(true)
+    end
+  end
 end

@@ -121,6 +121,8 @@ interface WhatsAppThreadProps {
   /** Estado del asistente en este chat (solo bandeja). Si se pasa onToggleAutomation, muestra el botón. */
   automationPaused?: boolean
   onToggleAutomation?: () => void
+  /** El asistente está encendido en general; si no, el botón dice «Asistente apagado». */
+  assistantActive?: boolean
 }
 
 export function WhatsAppThread({
@@ -136,6 +138,7 @@ export function WhatsAppThread({
   onDeleted,
   automationPaused = false,
   onToggleAutomation,
+  assistantActive = false,
 }: WhatsAppThreadProps) {
   const queryClient = useQueryClient()
   const canManageIntegrations = useAuthStore((s) => s.isAdmin() || s.isManager())
@@ -378,7 +381,16 @@ export function WhatsAppThread({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {onToggleAutomation && (
+          {onToggleAutomation && !assistantActive && (
+            <span
+              className="hidden items-center gap-1.5 text-xs text-primary-foreground/70 sm:flex"
+              title="El asistente IA está apagado para toda la empresa (Ajustes → Asistente IA)."
+            >
+              <BotOff className="h-4 w-4" />
+              Asistente apagado
+            </span>
+          )}
+          {onToggleAutomation && assistantActive && (
             <Button
               variant="ghost"
               size="sm"
