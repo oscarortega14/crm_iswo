@@ -5,7 +5,7 @@
 # ============================================================================
 # Configurar `CORS_ALLOWED_ORIGINS` como lista separada por comas.
 # Para producción, usar el dominio completo del SPA (ej.
-# https://app.crm.iswo.com.co).
+# https://app.iswocrm.com).
 #
 # En desarrollo también se aceptan orígenes http://{tenant}.localhost:PORT
 # para landings públicas por subdominio (RFC gap #9).
@@ -18,7 +18,7 @@ allowed = ENV.fetch("CORS_ALLOWED_ORIGINS", "http://localhost:3001,http://localh
 tenant_localhost_origin = %r{\Ahttp://[\w-]+\.localhost(:\d+)?\z}
 
 # Landings públicas por subdominio en producción (RFC §6.5):
-# https://{tenant}.crm.iswo.com.co. El dominio base sale de APP_HOST
+# https://{tenant}.iswocrm.com. El dominio base sale de APP_HOST
 # (ya requerido por Fase 1 seguridad) para no duplicar configuración.
 tenant_production_origin =
   if ENV["APP_HOST"].present?

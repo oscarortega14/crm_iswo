@@ -223,7 +223,7 @@ export interface Export {
 }
 
 // Integration Types
-export type IntegrationType = 'meta_ads' | 'google_ads' | 'whatsapp' | 'twilio'
+export type IntegrationType = 'meta_ads' | 'google_ads' | 'whatsapp'
 export type IntegrationStatus = 'connected' | 'disconnected' | 'error'
 
 export interface Integration {

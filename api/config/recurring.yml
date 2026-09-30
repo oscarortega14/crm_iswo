@@ -32,10 +32,20 @@ shared: &shared
     queue: low
     schedule: at 7am every day
 
+  temperature_decay_job:
+    class: TemperatureDecayJob
+    queue: low
+    schedule: at 5am every day
+
   whatsapp_campaign_batch_job:
     class: WhatsappCampaignBatchJob
     queue: integrations
     schedule: every 5 minutes
+
+  email_campaign_batch_job:
+    class: EmailCampaignBatchJob
+    queue: integrations
+    schedule: every minute
 
 development:
   <<: *shared

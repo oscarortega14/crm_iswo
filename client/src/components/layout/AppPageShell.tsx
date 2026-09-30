@@ -9,14 +9,15 @@ type AppPageShellProps = {
 }
 
 /**
- * Contenedor de página alineado con el panel principal: padding lateral, bottom safe
- * para la barra móvil, y ritmo vertical homogéneo.
+ * Contenedor de página alineado con el panel principal: padding lateral y ritmo
+ * vertical homogéneo. El espacio de la barra móvil ya lo reserva `<main>` (pb-16
+ * en AppLayout); no duplicarlo aquí.
  */
 export function AppPageShell({ children, className, contentClassName }: AppPageShellProps) {
   return (
-    <div className={cn('relative flex min-h-full flex-col pb-20 lg:pb-6', className)}>
+    <div className={cn('relative flex min-h-full flex-col pb-2 lg:pb-6', className)}>
       <div
-        className={cn('flex w-full max-w-[100vw] flex-1 flex-col gap-8 p-4 lg:p-6', contentClassName)}
+        className={cn('flex w-full max-w-[100vw] flex-1 flex-col gap-4 p-3 sm:gap-8 sm:p-4 lg:p-6', contentClassName)}
       >
         {children}
       </div>

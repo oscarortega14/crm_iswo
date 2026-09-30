@@ -94,6 +94,43 @@ RSpec.describe "Api::V1::Reminders", type: :request do
       expect(ReminderCreatedNotificationJob).to have_been_enqueued
       expect(ReminderDueDispatchJob).to have_been_enqueued
     end
+
+    it "sin user_id, el creador queda como responsable" do
+      post "/api/v1/opportunities/#{opportunity.id}/reminders",
+           params:  { reminder: { remind_at: 2.days.from_now.iso8601, channel: "in_app", subject: "Llamar" } }.to_json,
+           headers: auth_headers(consultant)
+
+      expect(response).to have_http_status(:created)
+      expect(Reminder.find(json.dig("data", "id")).user_id).to eq(consultant.id)
+    end
+
+    it "manager asigna el recordatorio a otro consultor via user_id" do
+      post "/api/v1/opportunities/#{opportunity.id}/reminders",
+           params:  {
+             reminder: {
+               remind_at: 2.days.from_now.iso8601, channel: "in_app", subject: "Llamar",
+               user_id: other_consultant.id
+             }
+           }.to_json,
+           headers: auth_headers(manager)
+
+      expect(response).to have_http_status(:created)
+      expect(Reminder.find(json.dig("data", "id")).user_id).to eq(other_consultant.id)
+    end
+
+    it "consultant no puede asignar user_id a otro — se ignora y queda como creador" do
+      post "/api/v1/opportunities/#{opportunity.id}/reminders",
+           params:  {
+             reminder: {
+               remind_at: 2.days.from_now.iso8601, channel: "in_app", subject: "Llamar",
+               user_id: other_consultant.id
+             }
+           }.to_json,
+           headers: auth_headers(consultant)
+
+      expect(response).to have_http_status(:created)
+      expect(Reminder.find(json.dig("data", "id")).user_id).to eq(consultant.id)
+    end
   end
 
   describe "POST /api/v1/reminders/:id/complete" do

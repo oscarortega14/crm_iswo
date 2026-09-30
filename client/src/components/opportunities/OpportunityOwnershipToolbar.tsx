@@ -15,7 +15,7 @@ export function OpportunityOwnershipToolbar({
   showOwnFilter = true,
 }: OpportunityOwnershipToolbarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 sm:px-4 sm:py-2.5">
       <Tabs
         value={value}
         onValueChange={(next) => onChange(next as OpportunityOwnershipFilter)}
@@ -34,7 +34,7 @@ export function OpportunityOwnershipToolbar({
           </TabsTrigger>
         </TabsList>
       </Tabs>
-      <p className="text-xs text-muted-foreground">
+      <p className="hidden text-xs text-muted-foreground sm:block">
         Las oportunidades de consultores referidos se muestran en solo lectura.
       </p>
     </div>

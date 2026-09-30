@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Edit, X } from 'lucide-react'
+import { Plus, Trash2, Edit, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +32,9 @@ import {
   createWhatsappTemplate,
   updateWhatsappTemplate,
   deleteWhatsappTemplate,
+  syncWhatsappTemplates,
   whatsappTemplateErrorMessage,
+  whatsappTemplateSyncErrorMessage,
   type WhatsappTemplate,
 } from '@/lib/whatsappTemplatesApi'
 import { queryKeys } from '@/lib/queryClient'
@@ -44,6 +46,7 @@ const emptyForm = {
   language: 'es_CO',
   variableLabels: [] as string[],
   variableNames: [] as string[],
+  optInRequest: false,
 }
 
 /**
@@ -79,6 +82,7 @@ export function WhatsappTemplatesPanel() {
         language: form.language.trim(),
         variable_labels: rows.map((r) => r.label),
         variable_names: rows.map((r) => r.name),
+        opt_in_request: form.optInRequest,
       }
       if (editing) {
         await updateWhatsappTemplate(editing.id, body)
@@ -110,6 +114,18 @@ export function WhatsappTemplatesPanel() {
     onError: (err) => toast.error(whatsappTemplateErrorMessage(err)),
   })
 
+  const syncMutation = useMutation({
+    mutationFn: () => syncWhatsappTemplates(),
+    onSuccess: (result) => {
+      invalidate()
+      const parts = [`${result.updated.length} actualizada(s)`]
+      if (result.newInMeta.length) parts.push(`${result.newInMeta.length} nueva(s) en Meta sin registrar`)
+      if (result.missingInMeta.length) parts.push(`${result.missingInMeta.length} ya no está(n) en Meta`)
+      toast.success(`Sincronizado con Meta: ${parts.join(' · ')}`)
+    },
+    onError: (err) => toast.error(whatsappTemplateSyncErrorMessage(err)),
+  })
+
   const openCreate = () => {
     setEditing(null)
     setForm(emptyForm)
@@ -124,6 +140,7 @@ export function WhatsappTemplatesPanel() {
       language: tpl.language,
       variableLabels: [...tpl.variableLabels],
       variableNames: [...tpl.variableNames],
+      optInRequest: tpl.optInRequest,
     })
     setDialogOpen(true)
   }
@@ -151,19 +168,35 @@ export function WhatsappTemplatesPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div>
           <h2 className="text-lg font-medium">Plantillas de WhatsApp</h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Catálogo de plantillas aprobadas por Meta. Se usan para iniciar conversación con
             leads que aún no han escrito primero (fuera de la ventana de 24h, WhatsApp rechaza
             texto libre con el error 131047 y exige una plantilla pre-aprobada).
           </p>
         </div>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          Nueva plantilla
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            title="Trae category y estado de aprobación reales desde Meta para las plantillas que ya existen en este catálogo"
+          >
+            {syncMutation.isPending ? (
+              <Spinner className="mr-2" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Sincronizar
+          </Button>
+          <Button size="sm" onClick={openCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva plantilla
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -188,6 +221,31 @@ export function WhatsappTemplatesPanel() {
                 <Badge variant="outline" className="shrink-0 text-xs font-normal">
                   {tpl.language}
                 </Badge>
+                {tpl.optInRequest && (
+                  <Badge variant="warning" className="shrink-0 text-xs font-normal">
+                    Pide opt-in
+                  </Badge>
+                )}
+                {tpl.category && (
+                  <Badge variant="secondary" className="shrink-0 text-xs font-normal">
+                    {tpl.category}
+                  </Badge>
+                )}
+                {tpl.metaStatus && (
+                  <Badge
+                    variant={
+                      tpl.metaStatus === 'APPROVED'
+                        ? 'success'
+                        : tpl.metaStatus === 'REJECTED'
+                          ? 'destructive'
+                          : 'warning'
+                    }
+                    className="shrink-0 text-xs font-normal"
+                    title={tpl.metaSyncedAt ? `Sincronizado con Meta: ${new Date(tpl.metaSyncedAt).toLocaleString()}` : undefined}
+                  >
+                    {tpl.metaStatus}
+                  </Badge>
+                )}
                 <div className="min-w-0">
                   <p className={`truncate text-sm ${!tpl.active ? 'text-muted-foreground line-through' : ''}`}>
                     {tpl.name}
@@ -284,6 +342,23 @@ export function WhatsappTemplatesPanel() {
                 value={form.language}
                 onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
                 placeholder="Ej: es_CO"
+              />
+            </div>
+
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
+              <div className="space-y-1">
+                <Label htmlFor="tplOptInRequest">Es una solicitud de opt-in</Label>
+                <p className="text-xs text-muted-foreground">
+                  Marcala solo si esta plantilla pide autorización de contacto (ej. «¿nos autorizas
+                  a escribirte?»). Una campaña con esta plantilla podrá llegar a contactos que
+                  todavía NO tienen opt-in — nunca uses esto para una plantilla de contenido
+                  promocional.
+                </p>
+              </div>
+              <Switch
+                id="tplOptInRequest"
+                checked={form.optInRequest}
+                onCheckedChange={(optInRequest) => setForm((f) => ({ ...f, optInRequest }))}
               />
             </div>
 

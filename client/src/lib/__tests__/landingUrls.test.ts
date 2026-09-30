@@ -44,12 +44,12 @@ describe('getTenantFromHostname', () => {
   })
 
   it('extrae tenant de subdominio de producción', () => {
-    mockHostname('libranzas.crm.iswo.com.co')
+    mockHostname('libranzas.iswocrm.com')
     expect(getTenantFromHostname()).toBe('libranzas')
   })
 
-  it('devuelve vacío para dominio sin subdominio de tenant', () => {
-    mockHostname('crm.iswo.com')
+  it('devuelve vacío para el apex sin subdominio de tenant', () => {
+    mockHostname('iswocrm.com')
     expect(getTenantFromHostname()).toBe('')
   })
 })

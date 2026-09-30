@@ -23,6 +23,7 @@ import { Route as AppOpportunitiesRouteImport } from './routes/_app/opportunitie
 import { Route as AppNetworkRouteImport } from './routes/_app/network'
 import { Route as AppLandingsRouteImport } from './routes/_app/landings'
 import { Route as AppExportsRouteImport } from './routes/_app/exports'
+import { Route as AppEmailRouteImport } from './routes/_app/email'
 import { Route as AppDuplicatesRouteImport } from './routes/_app/duplicates'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
 import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
@@ -34,6 +35,7 @@ import { Route as AppSettingsGeneralRouteImport } from './routes/_app/settings/g
 import { Route as AppSettingsFieldsRouteImport } from './routes/_app/settings/fields'
 import { Route as AppSettingsBantRouteImport } from './routes/_app/settings/bant'
 import { Route as AppSettingsAuditRouteImport } from './routes/_app/settings/audit'
+import { Route as AppSettingsAiAgentRouteImport } from './routes/_app/settings/ai-agent'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
@@ -104,6 +106,11 @@ const AppExportsRoute = AppExportsRouteImport.update({
   path: '/exports',
   getParentRoute: () => AppRoute,
 } as any)
+const AppEmailRoute = AppEmailRouteImport.update({
+  id: '/email',
+  path: '/email',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDuplicatesRoute = AppDuplicatesRouteImport.update({
   id: '/duplicates',
   path: '/duplicates',
@@ -160,6 +167,11 @@ const AppSettingsAuditRoute = AppSettingsAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAiAgentRoute = AppSettingsAiAgentRouteImport.update({
+  id: '/ai-agent',
+  path: '/ai-agent',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/$slug': typeof SlugRoute
@@ -169,6 +181,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/contacts': typeof AppContactsRoute
   '/duplicates': typeof AppDuplicatesRoute
+  '/email': typeof AppEmailRoute
   '/exports': typeof AppExportsRoute
   '/landings': typeof AppLandingsRoute
   '/network': typeof AppNetworkRoute
@@ -177,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/whatsapp': typeof AppWhatsappRoute
   '/l/$slug': typeof LSlugRoute
+  '/settings/ai-agent': typeof AppSettingsAiAgentRoute
   '/settings/audit': typeof AppSettingsAuditRoute
   '/settings/bant': typeof AppSettingsBantRoute
   '/settings/fields': typeof AppSettingsFieldsRoute
@@ -194,6 +208,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/contacts': typeof AppContactsRoute
   '/duplicates': typeof AppDuplicatesRoute
+  '/email': typeof AppEmailRoute
   '/exports': typeof AppExportsRoute
   '/landings': typeof AppLandingsRoute
   '/network': typeof AppNetworkRoute
@@ -203,6 +218,7 @@ export interface FileRoutesByTo {
   '/whatsapp': typeof AppWhatsappRoute
   '/l/$slug': typeof LSlugRoute
   '/': typeof AppIndexRoute
+  '/settings/ai-agent': typeof AppSettingsAiAgentRoute
   '/settings/audit': typeof AppSettingsAuditRoute
   '/settings/bant': typeof AppSettingsBantRoute
   '/settings/fields': typeof AppSettingsFieldsRoute
@@ -222,6 +238,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/_app/contacts': typeof AppContactsRoute
   '/_app/duplicates': typeof AppDuplicatesRoute
+  '/_app/email': typeof AppEmailRoute
   '/_app/exports': typeof AppExportsRoute
   '/_app/landings': typeof AppLandingsRoute
   '/_app/network': typeof AppNetworkRoute
@@ -231,6 +248,7 @@ export interface FileRoutesById {
   '/_app/whatsapp': typeof AppWhatsappRoute
   '/l/$slug': typeof LSlugRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/settings/ai-agent': typeof AppSettingsAiAgentRoute
   '/_app/settings/audit': typeof AppSettingsAuditRoute
   '/_app/settings/bant': typeof AppSettingsBantRoute
   '/_app/settings/fields': typeof AppSettingsFieldsRoute
@@ -251,6 +269,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/contacts'
     | '/duplicates'
+    | '/email'
     | '/exports'
     | '/landings'
     | '/network'
@@ -259,6 +278,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/whatsapp'
     | '/l/$slug'
+    | '/settings/ai-agent'
     | '/settings/audit'
     | '/settings/bant'
     | '/settings/fields'
@@ -276,6 +296,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/contacts'
     | '/duplicates'
+    | '/email'
     | '/exports'
     | '/landings'
     | '/network'
@@ -285,6 +306,7 @@ export interface FileRouteTypes {
     | '/whatsapp'
     | '/l/$slug'
     | '/'
+    | '/settings/ai-agent'
     | '/settings/audit'
     | '/settings/bant'
     | '/settings/fields'
@@ -303,6 +325,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/_app/contacts'
     | '/_app/duplicates'
+    | '/_app/email'
     | '/_app/exports'
     | '/_app/landings'
     | '/_app/network'
@@ -312,6 +335,7 @@ export interface FileRouteTypes {
     | '/_app/whatsapp'
     | '/l/$slug'
     | '/_app/'
+    | '/_app/settings/ai-agent'
     | '/_app/settings/audit'
     | '/_app/settings/bant'
     | '/_app/settings/fields'
@@ -432,6 +456,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppExportsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/email': {
+      id: '/_app/email'
+      path: '/email'
+      fullPath: '/email'
+      preLoaderRoute: typeof AppEmailRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/duplicates': {
       id: '/_app/duplicates'
       path: '/duplicates'
@@ -509,10 +540,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAuditRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/ai-agent': {
+      id: '/_app/settings/ai-agent'
+      path: '/ai-agent'
+      fullPath: '/settings/ai-agent'
+      preLoaderRoute: typeof AppSettingsAiAgentRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
   }
 }
 
 interface AppSettingsRouteChildren {
+  AppSettingsAiAgentRoute: typeof AppSettingsAiAgentRoute
   AppSettingsAuditRoute: typeof AppSettingsAuditRoute
   AppSettingsBantRoute: typeof AppSettingsBantRoute
   AppSettingsFieldsRoute: typeof AppSettingsFieldsRoute
@@ -525,6 +564,7 @@ interface AppSettingsRouteChildren {
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAiAgentRoute: AppSettingsAiAgentRoute,
   AppSettingsAuditRoute: AppSettingsAuditRoute,
   AppSettingsBantRoute: AppSettingsBantRoute,
   AppSettingsFieldsRoute: AppSettingsFieldsRoute,
@@ -543,6 +583,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 interface AppRouteChildren {
   AppContactsRoute: typeof AppContactsRoute
   AppDuplicatesRoute: typeof AppDuplicatesRoute
+  AppEmailRoute: typeof AppEmailRoute
   AppExportsRoute: typeof AppExportsRoute
   AppLandingsRoute: typeof AppLandingsRoute
   AppNetworkRoute: typeof AppNetworkRoute
@@ -556,6 +597,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppContactsRoute: AppContactsRoute,
   AppDuplicatesRoute: AppDuplicatesRoute,
+  AppEmailRoute: AppEmailRoute,
   AppExportsRoute: AppExportsRoute,
   AppLandingsRoute: AppLandingsRoute,
   AppNetworkRoute: AppNetworkRoute,

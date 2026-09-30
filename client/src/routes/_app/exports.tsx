@@ -53,6 +53,7 @@ import { tenantHasModule } from '@/lib/tenantModules'
 import { AppPageShell } from '@/components/layout/AppPageShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { ContactImportDialog } from '@/components/contacts/ContactImportDialog'
+import { statGridClass } from '@/lib/layoutClasses'
 
 export const Route = createFileRoute('/_app/exports')({
   beforeLoad: () => {
@@ -433,7 +434,7 @@ function ExportsPage() {
         )}
       </PageHeader>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className={`${statGridClass} md:grid-cols-3`}>
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">

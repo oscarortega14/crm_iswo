@@ -17,7 +17,7 @@ export const Route = createFileRoute('/$slug')({
   component: SubdomainLandingRoute,
 })
 
-/** RFC: https://{tenant}.crm.iswo.com.co/{slug} — en dev: {tenant}.localhost:3001/{slug} */
+/** RFC: https://{tenant}.iswocrm.com/{slug} — en dev: {tenant}.localhost:3001/{slug} */
 function SubdomainLandingRoute() {
   const { slug } = Route.useParams()
   return <PublicLandingPage slug={slug} />

@@ -4,62 +4,11 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Webhooks::Whatsapp", type: :request do
   around do |example|
-    originals = ENV.to_h.slice("TWILIO_AUTH_TOKEN", "META_APP_SECRET", "WHATSAPP_CLOUD_VERIFY_TOKEN")
+    originals = ENV.to_h.slice("META_APP_SECRET", "WHATSAPP_CLOUD_VERIFY_TOKEN")
     example.run
   ensure
-    %w[TWILIO_AUTH_TOKEN META_APP_SECRET WHATSAPP_CLOUD_VERIFY_TOKEN].each do |k|
+    %w[META_APP_SECRET WHATSAPP_CLOUD_VERIFY_TOKEN].each do |k|
       originals.key?(k) ? (ENV[k] = originals[k]) : ENV.delete(k)
-    end
-  end
-
-  describe "POST /api/v1/webhooks/whatsapp/twilio" do
-    let(:form_payload) do
-      {
-        "From"       => "whatsapp:+573001234567",
-        "To"         => "whatsapp:+14151234567",
-        "Body"       => "Hola",
-        "MessageSid" => "SM123abc"
-      }
-    end
-
-    it "procesa WebhookProcessorJob inline con 'whatsapp_twilio' (sin token → dev)" do
-      ENV.delete("TWILIO_AUTH_TOKEN")
-      expect(WebhookProcessorJob).to receive(:perform_now).with(
-        "whatsapp_twilio",
-        hash_including("From" => "whatsapp:+573001234567", "received_at" => kind_of(String))
-      )
-
-      post "/api/v1/webhooks/whatsapp/twilio", params: form_payload
-      expect(response).to have_http_status(:ok)
-    end
-
-    context "con TWILIO_AUTH_TOKEN" do
-      let(:token) { "test-auth-token" }
-      before { ENV["TWILIO_AUTH_TOKEN"] = token }
-
-      def twilio_signature(url, params, token)
-        data = params.sort.join
-        Base64.strict_encode64(OpenSSL::HMAC.digest("SHA1", token, url + data))
-      end
-
-      it "acepta con firma X-Twilio-Signature válida" do
-        url       = "http://www.example.com/api/v1/webhooks/whatsapp/twilio"
-        signature = twilio_signature(url, form_payload, token)
-
-        expect(WebhookProcessorJob).to receive(:perform_now)
-        post "/api/v1/webhooks/whatsapp/twilio",
-             params: form_payload,
-             headers: { "X-Twilio-Signature" => signature }
-        expect(response).to have_http_status(:ok)
-      end
-
-      it "rechaza con firma inválida (403)" do
-        expect(WebhookProcessorJob).not_to receive(:perform_now)
-        post "/api/v1/webhooks/whatsapp/twilio",
-             params: form_payload,
-             headers: { "X-Twilio-Signature" => "INVALID" }
-        expect(response).to have_http_status(:forbidden)
-      end
     end
   end
 

@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useRouter } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Menu,
   X,
@@ -25,6 +25,11 @@ import { logoutSession } from '@/lib/authSession'
 import { fetchDuplicateFlagsStats } from '@/lib/duplicateFlagsApi'
 import { fetchReminderStats } from '@/lib/reminderApi'
 import { fetchConversationStats } from '@/lib/whatsappInboxApi'
+import {
+  isNewInboundMessage,
+  playNewMessageSound,
+  unlockAudioOnFirstInteraction,
+} from '@/lib/notificationSound'
 import { tenantHasModule } from '@/lib/tenantModules'
 import { canUseReminders } from '@/lib/reminderChannels'
 import { filterMainNav, getSidebarSections, MAIN_NAV_ITEMS } from '@/lib/settingsNav'
@@ -95,14 +100,38 @@ export function AppLayout({ children }: AppLayoutProps) {
     refetchOnWindowFocus: true,
   })
 
+  // WhatsApp: consulta liviana cada 10 s en TODA la app (también con la pestaña
+  // en segundo plano). Cuando llega un mensaje entrante nuevo suena el aviso y se
+  // refresca la bandeja/los hilos abiertos — la bandeja ya no recarga la lista
+  // completa en cada poll.
+  const queryClient = useQueryClient()
   const { data: inboxStats } = useQuery({
     queryKey: queryKeys.whatsappConversations.stats(authScope),
     queryFn: fetchConversationStats,
     enabled: Boolean(authScope),
-    refetchInterval: 60_000,
-    refetchIntervalInBackground: false,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
   })
+
+  useEffect(() => {
+    unlockAudioOnFirstInteraction()
+  }, [])
+
+  const lastInboundIdRef = useRef<number | null | undefined>(undefined)
+  useEffect(() => {
+    if (!inboxStats) return
+    const latest = inboxStats.latestInboundId
+    const previous = lastInboundIdRef.current
+    lastInboundIdRef.current = latest
+    if (!isNewInboundMessage(previous, latest)) return
+    playNewMessageSound()
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.whatsappConversations.all,
+      predicate: (q) => q.queryKey[1] !== 'stats',
+    })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.opportunities.all, predicate: (q) => q.queryKey[1] === 'messages' })
+  }, [inboxStats, queryClient])
 
   const mainNavBase = useMemo(
     () => filterMainNav(MAIN_NAV_ITEMS, user?.role, tenant),
@@ -159,6 +188,16 @@ export function AppLayout({ children }: AppLayoutProps) {
     return () => document.removeEventListener('keydown', down)
   }, [])
 
+  // Esc cierra el menú lateral.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sidebarOpen])
+
   useEffect(() => {
     setSidebarOpen(false)
   }, [location.pathname])
@@ -195,14 +234,19 @@ export function AppLayout({ children }: AppLayoutProps) {
     <div className="flex h-screen overflow-hidden bg-background">
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/50"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
+      {/* Menú lateral: oculto por defecto en todas las pantallas; se abre con «Menú». */}
       <aside
+        id="app-sidebar"
+        aria-label="Menú principal"
+        aria-hidden={!sidebarOpen}
+        inert={!sidebarOpen}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-60 min-h-0 flex-col overflow-hidden border-r bg-sidebar transition-transform duration-200 lg:static lg:h-full lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-60 min-h-0 flex-col overflow-hidden border-r bg-sidebar shadow-xl transition-transform duration-200',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
@@ -242,8 +286,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           <Button
             variant="ghost"
             size="icon-sm"
-            className="ml-auto lg:hidden"
+            className="ml-auto"
             onClick={() => setSidebarOpen(false)}
+            aria-label="Cerrar menú"
           >
             <X className="size-4" />
           </Button>
@@ -328,11 +373,14 @@ export function AppLayout({ children }: AppLayoutProps) {
         <header className="flex h-14 items-center gap-4 border-b bg-background px-4">
           <Button
             variant="ghost"
-            size="icon"
-            className="lg:hidden"
+            className="h-9 gap-2 px-2 lg:px-3"
             onClick={() => setSidebarOpen(true)}
+            aria-label="Abrir menú"
+            aria-controls="app-sidebar"
+            aria-expanded={sidebarOpen}
           >
             <Menu className="size-5" />
+            <span className="hidden text-sm font-medium lg:inline">Menú</span>
           </Button>
 
           <button

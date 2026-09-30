@@ -41,6 +41,11 @@ class ContactSerializer < ApplicationSerializer
     c.has_attribute?(:source_label) ? c[:source_label] : nil
   end
 
+  # Todas las vías por las que llegó (incluye las de contactos fusionados).
+  attribute :origins do |c|
+    c.has_attribute?(:origins) ? Array(c[:origins]) : []
+  end
+
   attribute :last_contacted_at do |c|
     c.respond_to?(:last_contacted_at) ? c.last_contacted_at : nil
   end
@@ -50,6 +55,21 @@ class ContactSerializer < ApplicationSerializer
   end
 
   attribute :whatsapp_opt_in_source, &:whatsapp_opt_in_source
+
+  attribute :whatsapp_opt_in_at, &:whatsapp_opt_in_at
+
+  attribute :whatsapp_opted_out do |c|
+    c.whatsapp_opted_out?
+  end
+
+  attribute :whatsapp_opt_out_at, &:whatsapp_opt_out_at
+
+  attribute :email_opted_out do |c|
+    c.email_opted_out?
+  end
+
+  attribute :email_opt_out_source, &:email_opt_out_source
+  attribute :email_opt_out_at, &:email_opt_out_at
 
   attribute :full_name do |c|
     [c.first_name, c.last_name].compact.join(" ").strip.presence || c.company.presence || "—"

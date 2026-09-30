@@ -7,7 +7,6 @@ import {
   Check,
   Megaphone,
   MessageCircle,
-  Phone,
   Settings,
   Loader2,
 } from 'lucide-react'
@@ -131,37 +130,11 @@ const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
   },
   {
-    provider: 'twilio',
-    category: 'messaging',
-    title: 'Twilio (WhatsApp)',
-    description:
-      'Salientes: Account SID (AC…) + Auth Token + número E.164 de tu línea Twilio. Entrantes: en Twilio Console → Messaging → WhatsApp sandbox (o tu número) configura «When a message comes in» = URL pública POST …/api/v1/webhooks/whatsapp/twilio (ngrok + API_PUBLIC_ORIGIN en local). Sin ese webhook el CRM no recibe respuestas del teléfono.',
-    icon: Phone,
-    accountIdentifierLabel: 'Número WhatsApp de Twilio (remitente, E.164)',
-    accountIdentifierPlaceholder: '+14155238886 (sandbox) o tu número WABA',
-    accountIdentifierHint:
-      'Tu línea Twilio (From al enviar). En sandbox suele ser +14155238886. Sin prefijo whatsapp:. También debe coincidir con el To que Twilio envía en webhooks entrantes.',
-    credentialFields: [
-      {
-        key: 'account_sid',
-        label: 'Account SID (solo AC…, no SK…)',
-        type: 'text',
-        placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-      },
-      {
-        key: 'auth_token',
-        label: 'Auth Token (Primary de la cuenta; no uses Secret del API Key SK…)',
-        type: 'password',
-        placeholder: 'Pega el token de Console → API keys & tokens',
-      },
-    ],
-  },
-  {
     provider: 'whatsapp_cloud',
     category: 'messaging',
     title: 'WhatsApp Cloud API',
     description:
-      'Usa las URLs Cloud del bloque del servidor. Guarda el Phone number ID aquí; debe coincidir con metadata.phone_number_id del payload.',
+      'Usa las URLs Cloud del bloque del servidor. Guarda el Phone number ID aquí; debe coincidir con metadata.phone_number_id del payload. El WABA ID (abajo) es necesario para el botón «Sincronizar» del catálogo de plantillas — el access token debe tener el permiso whatsapp_business_management además de whatsapp_business_messaging.',
     icon: MessageCircle,
     accountIdentifierLabel: 'Phone number ID (Meta Cloud API)',
     accountIdentifierPlaceholder: 'Phone number ID en Meta Developer',
@@ -174,6 +147,14 @@ const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
         type: 'password',
         placeholder:
           'EAAG… (OAuth User token, no el App Secret; sin escribir «Bearer », sin comillas)',
+      },
+    ],
+    metadataFields: [
+      {
+        key: 'waba_id',
+        label: 'WABA ID (WhatsApp Business Account)',
+        type: 'text',
+        placeholder: '1606763050800373',
       },
     ],
   },
@@ -409,7 +390,7 @@ function IntegrationsSettingsPage() {
         <div>
           <h2 className="text-lg font-medium">Integraciones</h2>
           <p className="text-sm text-muted-foreground">
-            Canales reales conectados al CRM (Meta, Google Ads, Twilio, WhatsApp Cloud). Las
+            Canales reales conectados al CRM (Meta, Google Ads, WhatsApp Cloud, OpenWA). Las
             credenciales se almacenan cifradas; no se muestran de nuevo tras guardarlas.
           </p>
         </div>
@@ -432,10 +413,7 @@ function IntegrationsSettingsPage() {
         <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
           <p className="mb-2 font-medium">URLs de webhook (desde el API — sin datos inventados)</p>
           <p className="mb-3 text-xs text-muted-foreground">
-            Configura estas URLs en Meta, Google y Twilio. Para <strong>respuestas WhatsApp del
-            teléfono</strong>, en Twilio Console (Sandbox → When a message comes in) usa exactamente{' '}
-            <code className="rounded bg-muted px-1">Twilio WhatsApp (POST)</code> de abajo — no basta
-            con StatusCallback del envío saliente. En local necesitas ngrok y{' '}
+            Configura estas URLs en Meta y Google. En local necesitas ngrok y{' '}
             <code className="rounded bg-muted px-1">API_PUBLIC_ORIGIN</code> en el API apuntando a esa
             URL pública.
           </p>
@@ -443,7 +421,6 @@ function IntegrationsSettingsPage() {
             <WebhookUrlRow label="Meta — verificación (GET)" url={webhookUrls.meta_verify_get} />
             <WebhookUrlRow label="Meta — leads (POST)" url={webhookUrls.meta_leads_post} />
             <WebhookUrlRow label="Google — leads (POST)" url={webhookUrls.google_leads_post} />
-            <WebhookUrlRow label="Twilio WhatsApp (POST)" url={webhookUrls.whatsapp_twilio_post} />
             <WebhookUrlRow label="WhatsApp Cloud — verificación (GET)" url={webhookUrls.whatsapp_cloud_verify_get} />
             <WebhookUrlRow label="WhatsApp Cloud — mensajes (POST)" url={webhookUrls.whatsapp_cloud_post} />
             <WebhookUrlRow label="OpenWA — mensajes (POST)" url={webhookUrls.whatsapp_openwa_post} />

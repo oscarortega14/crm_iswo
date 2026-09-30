@@ -29,26 +29,45 @@ module Notifications
       return unless @message.direction_in?
 
       owner = @message.opportunity&.owner_user || @contact.owner_user
-      owner ? notify(owner, title: "Nuevo mensaje de WhatsApp") : notify_admins_and_managers
+      owner ? notify(owner, title: title_for(assigned: true)) : notify_admins_and_managers
     end
 
     private
 
     def notify_admins_and_managers
       @message.tenant.users.where(role: %w[admin manager]).find_each do |user|
-        notify(user, title: "Mensaje de WhatsApp sin asignar")
+        notify(user, title: title_for(assigned: false))
       end
     end
 
+    # Un «Sí» a una campaña se avisa distinto: es un lead listo para atender.
+    def confirmation?
+      @confirmation = WhatsApp::ConsentReply.classify(@message.body) == :opt_in if @confirmation.nil?
+      @confirmation
+    end
+
+    def title_for(assigned:)
+      return "#{@contact.display_name} autorizó WhatsApp" if confirmation?
+
+      assigned ? "Nuevo mensaje de WhatsApp" : "Mensaje de WhatsApp sin asignar"
+    end
+
+    def body_text
+      return "Respondió «Sí». Está esperando respuesta: escríbele desde la bandeja." if confirmation?
+
+      "#{@contact.display_name}: #{@message.body.to_s.truncate(120)}"
+    end
+
     def notify(user, title:)
-      return if already_unread_for?(user)
+      # Un «Sí» siempre avisa, aunque haya otro aviso sin leer del mismo contacto.
+      return if already_unread_for?(user) && !confirmation?
 
       Notification.create!(
         tenant:   @message.tenant,
         user:     user,
         kind:     "whatsapp_message_received",
         title:    title,
-        body:     "#{@contact.display_name}: #{@message.body.to_s.truncate(120)}",
+        body:     body_text,
         resource: @contact
       )
     rescue ActiveRecord::RecordInvalid => e

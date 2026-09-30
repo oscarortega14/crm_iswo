@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
-import type { StageAutoTrigger } from '@/types'
+import type { PipelineStage, StageAutoTrigger } from '@/types'
 
 /** Disparadores de auto-avance de etapa (espejo de Opportunities::StageAutomation::TRIGGERS). */
 export const STAGE_AUTO_TRIGGER_LABELS: Record<StageAutoTrigger, string> = {
@@ -86,4 +86,29 @@ export function formatCompactCurrency(value: number, currency = 'COP'): string {
     currency,
     maximumFractionDigits: 0,
   }).format(n)
+}
+
+/**
+ * Etapa a la que lleva el botón «Avanzar» del tablero móvil: la siguiente por
+ * posición, saltando las de cierre perdido (perder nunca es "avanzar").
+ * null si la actual es de cierre o no hay siguiente.
+ */
+export function nextAdvanceStage(
+  stages: PipelineStage[],
+  currentStageId: string | undefined,
+): PipelineStage | null {
+  const ordered = [...stages].sort((a, b) => a.position - b.position)
+  const current = ordered.find((s) => s.id === currentStageId)
+  if (!current || current.is_closed_won || current.is_closed_lost) return null
+  return ordered.find((s) => s.position > current.position && !s.is_closed_lost) ?? null
+}
+
+/** «Hoy», «1 día», «9 días» en la etapa; urgente desde 7 días. */
+export function daysInStageLabel(referenceAt?: string | null): { label: string; urgent: boolean } {
+  if (!referenceAt) return { label: '', urgent: false }
+  const ref = parseISO(referenceAt)
+  if (Number.isNaN(ref.getTime())) return { label: '', urgent: false }
+  const days = Math.max(0, differenceInCalendarDays(new Date(), ref))
+  if (days === 0) return { label: 'Hoy en esta etapa', urgent: false }
+  return { label: `${days} ${days === 1 ? 'día' : 'días'} en esta etapa`, urgent: days >= 7 }
 }

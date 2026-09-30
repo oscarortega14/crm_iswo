@@ -36,7 +36,7 @@ class LandingPage < ApplicationRecord
     if ENV["LANDING_PUBLIC_HOST"].present?
       ENV["LANDING_PUBLIC_HOST"].strip.chomp("/")
     elsif Rails.env.production?
-      "https://#{tenant.slug}.crm.iswo.com.co"
+      "https://#{tenant.slug}.#{ENV.fetch('APP_HOST', 'iswocrm.com')}"
     else
       port = ENV.fetch("VITE_FRONTEND_PORT", "3001")
       "http://#{tenant.slug}.localhost:#{port}"

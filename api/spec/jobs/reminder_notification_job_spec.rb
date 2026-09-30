@@ -77,7 +77,7 @@ RSpec.describe ReminderNotificationJob, type: :job do
         before do
           allow(reminder).to receive(:user).and_return(staff_user)
           allow(reminder).to receive(:opportunity).and_return(build_stubbed(:opportunity, tenant: tenant))
-          allow(tenant).to receive(:whatsapp_outbound_provider).and_return("twilio")
+          allow(tenant).to receive(:whatsapp_outbound_provider).and_return("whatsapp_cloud")
           allow(tenant).to receive(:whatsapp_outbound_from_number_for).and_return("+15550001")
           allow(tenant).to receive_message_chain(:whatsapp_messages, :create!).and_return(
             instance_double(WhatsappMessage, id: 99)

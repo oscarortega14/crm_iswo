@@ -4,7 +4,7 @@
 # WhatsappDeliveryJob — envía un WhatsappMessage outbound al proveedor.
 # ============================================================================
 # Wrapper sobre WhatsApp::MessageSender. Se encola desde:
-#   - WhatsappMessagesController#create
+#   - WhatsApp::OutboundSender (chat 1-a-1: inbox + oportunidad, perform_later)
 #   - ReminderNotificationJob (WhatsApp al teléfono del consultor asignado)
 #
 # Usa cola "integrations" para no saturar la default.

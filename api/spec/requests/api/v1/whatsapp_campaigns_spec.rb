@@ -129,4 +129,110 @@ RSpec.describe "Api::V1::WhatsappCampaigns", type: :request do
       expect(json.dig("data", "attributes", "status")).to eq("canceled")
     end
   end
+
+  describe "POST /api/v1/whatsapp_campaigns/:id/launch con plantilla no aprobada" do
+    it "409 con el motivo y la campaña sigue en borrador" do
+      create(:ad_integration, :cloud, tenant: tenant, account_identifier: "123456")
+      template.update!(meta_status: "PENDING")
+
+      post "/api/v1/whatsapp_campaigns/#{campaign.id}/launch", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:conflict)
+      expect(json["message"]).to match(/PENDING en Meta/)
+      expect(campaign.reload).to be_status_draft
+    end
+  end
+
+  describe "POST /api/v1/whatsapp_campaigns/:id/duplicate" do
+    it "crea un borrador editable (manager)" do
+      campaign.update!(status: "completed")
+
+      expect do
+        post "/api/v1/whatsapp_campaigns/#{campaign.id}/duplicate", headers: auth_headers(manager)
+      end.to change(WhatsappCampaign, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(json.dig("data", "attributes", "status")).to eq("draft")
+      expect(json.dig("data", "attributes", "name")).to eq("#{campaign.name} (copia)")
+    end
+
+    it "consultant no puede: las campañas no son visibles para su rol (404) y no se crea nada" do
+      expect do
+        post "/api/v1/whatsapp_campaigns/#{campaign.id}/duplicate", headers: auth_headers(consultant)
+      end.not_to change(WhatsappCampaign, :count)
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "GET /api/v1/whatsapp_campaigns/:id/recipients" do
+    it "lista cada destinatario con su resultado real y el motivo del fallo" do
+      contact = create(:contact, tenant: tenant, first_name: "Ana", last_name: "Ruiz")
+      msg = create(:whatsapp_message, :outbound, :cloud, tenant: tenant, contact: contact, status: "failed",
+                                                         to_number: "+573001112233",
+                                                         error_message: "Cloud API: (#132001) Template name does not exist")
+      create(:whatsapp_campaign_recipient, tenant: tenant, whatsapp_campaign: campaign, contact: contact,
+                                           status: "sent", whatsapp_message: msg)
+
+      get "/api/v1/whatsapp_campaigns/#{campaign.id}/recipients", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      row = json["data"].first["attributes"]
+      expect(row).to include("result" => "failed", "contact_name" => "Ana Ruiz", "to_number" => "+573001112233")
+      expect(row["reason"]).to match(/132001/)
+    end
+
+    it "incluye delivery_stats en la campaña lanzada" do
+      campaign.update!(status: "completed")
+      get "/api/v1/whatsapp_campaigns/#{campaign.id}", headers: auth_headers(admin)
+      expect(json.dig("data", "attributes", "delivery_stats")).to include("total" => 0, "failed" => 0)
+    end
+  end
+
+  describe "filtro por origen del contacto (archivo importado)" do
+    let(:file) { "Excel: 2026-07-08 Expo Calidad Ecuador.xlsx" }
+
+    before do
+      pipeline = create(:pipeline_with_stages, tenant: tenant)
+      stage = pipeline.pipeline_stages.first
+      [
+        [ "+593991234567", file ], [ "+573001112233", file ], [ "+573004445566", "Landing ISO 9001" ]
+      ].each do |phone, origin|
+        c = create(:contact, tenant: tenant, phone_e164: phone, source_kind: "import", source_label: origin)
+        create(:opportunity, tenant: tenant, contact: c, pipeline: pipeline, pipeline_stage: stage)
+      end
+    end
+
+    it "audience_preview cuenta solo los de ese archivo y muestra el país de los celulares" do
+      get "/api/v1/whatsapp_campaigns/audience_preview", params: { contact_origin: file }, headers: auth_headers(admin)
+      expect(json["total"]).to eq(2)
+      expect(json["countries"]).to eq("EC" => 1, "CO" => 1)
+    end
+
+    it "la campaña lanzada solo incluye a los contactos de ese origen" do
+      template.update!(opt_in_request: true, meta_status: "APPROVED")
+      campaign.update!(audience_filters: { "contact_origin" => file })
+      create(:ad_integration, :cloud, tenant: tenant, account_identifier: "123456")
+
+      campaign.launch!
+      expect(campaign.whatsapp_campaign_recipients.map { |r| r.contact.source_label }.uniq).to eq([ file ])
+      expect(campaign.total_recipients).to eq(2)
+    end
+  end
+
+  describe "mensaje al autorizar" do
+    it "se guarda en la campaña, se copia al duplicar y muestra cuántos autorizaron" do
+      patch "/api/v1/whatsapp_campaigns/#{campaign.id}", headers: auth_headers(admin),
+            params: { whatsapp_campaign: { confirm_reply_body: "¡Gracias {{nombre}}!" } }.to_json
+      expect(json.dig("data", "attributes", "confirm_reply_body")).to eq("¡Gracias {{nombre}}!")
+
+      post "/api/v1/whatsapp_campaigns/#{campaign.id}/duplicate", headers: auth_headers(admin)
+      expect(json.dig("data", "attributes", "confirm_reply_body")).to eq("¡Gracias {{nombre}}!")
+
+      campaign.update_columns(status: "completed")
+      create(:whatsapp_campaign_recipient, tenant: tenant, whatsapp_campaign: campaign, status: "sent",
+                                           confirmed_at: Time.current)
+      get "/api/v1/whatsapp_campaigns/#{campaign.id}", headers: auth_headers(admin)
+      expect(json.dig("data", "attributes", "confirmation_stats")).to eq("confirmed" => 1, "replied" => 0)
+    end
+  end
 end

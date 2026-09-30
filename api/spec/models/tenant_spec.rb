@@ -86,26 +86,16 @@ RSpec.describe Tenant, type: :model do
   end
 
   describe "#whatsapp_outbound_from_number", :without_tenant do
-    around do |example|
-      # Limpiar ENV vars que tienen prioridad sobre la integración en la lógica del modelo
-      old_twilio  = ENV.delete("TWILIO_WHATSAPP_NUMBER")
-      old_provider = ENV.delete("WHATSAPP_PROVIDER")
-      example.run
-    ensure
-      ENV["TWILIO_WHATSAPP_NUMBER"] = old_twilio   if old_twilio
-      ENV["WHATSAPP_PROVIDER"]      = old_provider if old_provider
-    end
-
-    it "usa la integración Twilio aunque el estado sea error (no solo active)" do
-      tenant = create(:tenant, settings: {})
-      ActsAsTenant.with_tenant(tenant) do
-        create(
-          :ad_integration, :twilio, :errored, tenant:,
-          account_identifier: "+573001111222"
-        )
-      end
+    it "usa settings.whatsapp.number si está presente" do
+      tenant = create(:tenant, settings: { "whatsapp" => { "number" => "+573001111222" } })
 
       expect(tenant.reload.whatsapp_outbound_from_number).to eq("+573001111222")
+    end
+
+    it "devuelve nil si no hay settings.whatsapp.number" do
+      tenant = create(:tenant, settings: {})
+
+      expect(tenant.reload.whatsapp_outbound_from_number).to be_nil
     end
   end
 
@@ -118,39 +108,39 @@ RSpec.describe Tenant, type: :model do
       original ? (ENV["WHATSAPP_PROVIDER"] = original) : ENV.delete("WHATSAPP_PROVIDER")
     end
 
-    it "prefiere whatsapp_cloud cuando Twilio y Cloud tienen credenciales" do
+    it "prefiere whatsapp_cloud cuando OpenWA y Cloud tienen credenciales" do
       tenant = create(:tenant)
       ActsAsTenant.with_tenant(tenant) do
-        create(:ad_integration, :twilio, tenant: tenant)
+        create(:ad_integration, :openwa, tenant: tenant)
         create(:ad_integration, :cloud, tenant: tenant)
       end
 
       expect(tenant.reload.whatsapp_outbound_provider).to eq("whatsapp_cloud")
     end
 
-    it "usa twilio si solo Twilio está configurado" do
+    it "usa openwa si solo OpenWA está configurado" do
       tenant = create(:tenant)
-      ActsAsTenant.with_tenant(tenant) { create(:ad_integration, :twilio, tenant: tenant) }
+      ActsAsTenant.with_tenant(tenant) { create(:ad_integration, :openwa, tenant: tenant) }
 
-      expect(tenant.reload.whatsapp_outbound_provider).to eq("twilio")
+      expect(tenant.reload.whatsapp_outbound_provider).to eq("openwa")
     end
 
     it "respeta WHATSAPP_PROVIDER cuando ambas integraciones existen" do
-      ENV["WHATSAPP_PROVIDER"] = "twilio"
+      ENV["WHATSAPP_PROVIDER"] = "openwa"
       tenant = create(:tenant)
       ActsAsTenant.with_tenant(tenant) do
-        create(:ad_integration, :twilio, tenant: tenant)
+        create(:ad_integration, :openwa, tenant: tenant)
         create(:ad_integration, :cloud, tenant: tenant)
       end
 
-      expect(tenant.reload.whatsapp_outbound_provider).to eq("twilio")
+      expect(tenant.reload.whatsapp_outbound_provider).to eq("openwa")
     end
 
     it "respeta settings whatsapp.provider" do
-      tenant = create(:tenant, settings: { "whatsapp" => { "provider" => "twilio" } })
+      tenant = create(:tenant, settings: { "whatsapp" => { "provider" => "openwa" } })
       ActsAsTenant.with_tenant(tenant) { create(:ad_integration, :cloud, tenant: tenant) }
 
-      expect(tenant.reload.whatsapp_outbound_provider).to eq("twilio")
+      expect(tenant.reload.whatsapp_outbound_provider).to eq("openwa")
     end
   end
 end

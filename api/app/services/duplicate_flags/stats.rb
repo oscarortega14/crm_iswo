@@ -10,7 +10,7 @@ module DuplicateFlags
     def call
       scope = DuplicateFlagPolicy::Scope.new(@user, DuplicateFlag.all).resolve
       {
-        pending: scope.resolution_pending.count,
+        pending: scope.actionable.count,
         total:   scope.count
       }
     end

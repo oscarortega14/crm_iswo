@@ -2,31 +2,41 @@
 # tenants (ajuste global, no específico a un tenant) que fueron autorizados
 # fuera del sistema antes de existir el gate de opt-in.
 #
-# Reutiliza exactamente la misma lógica que POST /api/v1/contacts/bulk_whatsapp_opt_in
-# (Contact#mark_whatsapp_opt_in! + AuditEvent por contacto vía AuditLogger),
-# pero sin el límite de "10 por página" de la UI y recorriendo todos los tenants.
+# Reutiliza exactamente la misma lógica que ya usa el sistema para marcar
+# opt-in (Contact#mark_whatsapp_opt_in! + AuditEvent por contacto vía
+# AuditLogger), pero recorriendo TODOS los contactos sin opt-in de TODOS los
+# tenants de una sola corrida.
 #
 # Uso:
 #   DRY_RUN=true  bin/rails runner script/bulk_whatsapp_opt_in.rb   # solo cuenta, no persiste
 #   DRY_RUN=false bin/rails runner script/bulk_whatsapp_opt_in.rb   # ejecuta de verdad
 #
-# En producción (Kamal):
-#   kamal app exec -i 'bin/rails runner script/bulk_whatsapp_opt_in.rb' # con DRY_RUN=true por defecto
-#   kamal app exec -i -e DRY_RUN=false 'bin/rails runner script/bulk_whatsapp_opt_in.rb'
+# Para limitar la corrida a uno o más tenants puntuales (en vez de todos):
+#   TENANT_SLUGS=iswo bin/rails runner script/bulk_whatsapp_opt_in.rb
+#   TENANT_SLUGS=micasita,libranzas DRY_RUN=false bin/rails runner script/bulk_whatsapp_opt_in.rb
+#
+# En producción (Dokku, ver .github/workflows/deploy.yml — app "crm-iswo-api"):
+#   ssh dokku@$DOKKU_HOST run crm-iswo-api bin/rails runner script/bulk_whatsapp_opt_in.rb
+#   ssh dokku@$DOKKU_HOST run crm-iswo-api bash -c "DRY_RUN=false bin/rails runner script/bulk_whatsapp_opt_in.rb"
 #
 # Idempotente: solo toca contactos con whatsapp_opt_in_at: nil, así que se
 # puede correr más de una vez sin duplicar nada.
 
-dry_run = ActiveModel::Type::Boolean.new.cast(ENV.fetch("DRY_RUN", "true"))
-source  = ENV.fetch("WHATSAPP_OPT_IN_SOURCE", "import")
+dry_run      = ActiveModel::Type::Boolean.new.cast(ENV.fetch("DRY_RUN", "true"))
+source       = ENV.fetch("WHATSAPP_OPT_IN_SOURCE", "import")
+tenant_slugs = ENV["TENANT_SLUGS"].to_s.split(",").map(&:strip).reject(&:blank?)
 
-puts "=== Bulk WhatsApp opt-in global — dry_run=#{dry_run} source=#{source.inspect} ==="
+tenants = Tenant.kept.order(:id)
+tenants = tenants.where(slug: tenant_slugs) if tenant_slugs.any?
+
+puts "=== Bulk WhatsApp opt-in global — dry_run=#{dry_run} source=#{source.inspect}" \
+     "#{tenant_slugs.any? ? " tenants=#{tenant_slugs.join(',')}" : ''} ==="
 
 total_marked = 0
 
-Tenant.kept.order(:id).find_each do |tenant|
+tenants.find_each do |tenant|
   ActsAsTenant.with_tenant(tenant) do
-    scope = tenant.contacts.kept.where(whatsapp_opt_in_at: nil)
+    scope = tenant.contacts.kept.where(whatsapp_opt_in_at: nil, whatsapp_opt_out_at: nil)
     count = scope.count
     next if count.zero?
 

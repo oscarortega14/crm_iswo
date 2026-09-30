@@ -83,6 +83,10 @@ Rails.application.routes.draw do
           delete :bulk_destroy          # { ids: [...] }
           post   :backfill_whatsapp_opt_in # ?dry_run=true — opt-in a quien ya escribió
           post   :bulk_whatsapp_opt_in     # { ids: [...] } — opt-in manual (admin/manager)
+          post   :bulk_whatsapp_opt_out    # { ids: [...] } — "no autoriza" manual (admin/manager)
+          post   :bulk_email_opt_out       # { ids: [...] } — baja manual de correos (admin/manager)
+          get    :origin_options           # orígenes (archivo importado, landing…) con su conteo
+          post   :bulk_email_opt_in        # { ids: [...] } — deshace solo bajas manuales
         end
         member do
           post :claim                   # "Tomar lead" — inbox WhatsApp sin asignar
@@ -192,18 +196,42 @@ Rails.application.routes.draw do
 
       # ---- WhatsApp standalone ----------------------------------------------
       resources :whatsapp_messages, only: %i[index show]
-      resources :whatsapp_templates
+      resources :whatsapp_templates do
+        collection { post :sync } # trae category/status/id desde Meta (WhatsApp::TemplateSync)
+      end
 
       # ---- Campañas WhatsApp (mensajería masiva) ------------------------------
       resources :whatsapp_campaigns, only: %i[index show create update] do
         collection { get :audience_preview }
-        member { post :launch; post :pause; post :resume; post :cancel }
+        member { post :launch; post :pause; post :resume; post :cancel; post :duplicate; get :recipients }
+      end
+
+      # ---- Asistente IA de WhatsApp (OpenAI) ----------------------------------
+      resource :ai_agent, only: %i[show update], controller: "ai_agent" do
+        post :test
+        get  :activity
+      end
+
+      # ---- Email marketing (AWS SES, dominio propio del tenant) ---------------
+      resource :email_sender, only: %i[show update] do
+        post :verify
+        post :refresh
+      end
+      resources :email_campaigns, only: %i[index show create update destroy] do
+        collection { get :audience_preview }
+        member do
+          post :launch; post :pause; post :resume; post :cancel; post :duplicate; post :send_test
+          get :recipients
+        end
       end
 
       # ---- Bandeja de entrada WhatsApp (inbox) --------------------------------
       resources :whatsapp_conversations, only: [:index], param: :contact_id do
         collection { get :stats }
-        member { patch :mark_read; post :send_message }
+        member do
+          patch :mark_read; post :send_message; delete :messages, action: :destroy_messages
+          patch :automation # { paused: true|false } — «pausar automático» en este chat
+        end
       end
 
       # ---- Exports ----------------------------------------------------------
@@ -222,13 +250,22 @@ Rails.application.routes.draw do
         # Google Ads Lead Form Extensions (Conversion API)
         post "/google",          to: "google_ads#create"
 
-        # WhatsApp — Twilio y Cloud API
-        post "/whatsapp/twilio",  to: "whatsapp#twilio"
+        # WhatsApp — Cloud API
         post "/whatsapp/cloud",   to: "whatsapp#cloud"
         get  "/whatsapp/cloud",   to: "whatsapp#verify_cloud"
 
         # WhatsApp — OpenWA (auto-hospedado)
         post "/whatsapp/openwa",  to: "open_wa#create"
+
+        # AWS SES → SNS: entregas, rebotes, quejas, aperturas y clics (email marketing)
+        post "/ses",              to: "ses#create"
+      end
+
+      # ========================================================================
+      # Integraciones internas (secreto compartido, no JWT ni firma de proveedor)
+      # ========================================================================
+      namespace :integrations do
+        post "/blog_subscribers", to: "blog_subscribers#create"
       end
 
       # ========================================================================
@@ -237,9 +274,8 @@ Rails.application.routes.draw do
       namespace :public, path: "public" do
         get  "/landings/:slug",        to: "landing_pages#show", as: :landing_page
         post "/landings/:slug/submit", to: "landing_form_submissions#create", as: :landing_submit
-
-        # Fallback dev/self-hosted cuando no hay S3 (ver Assets::PublicUrlResolver)
-        get "/assets/:id/download", to: "asset_downloads#show", as: :asset_download
+        get  "/email/unsubscribe",     to: "email_unsubscribes#show",   as: :email_unsubscribe
+        post "/email/unsubscribe",     to: "email_unsubscribes#create"
       end
 
       # ========================================================================

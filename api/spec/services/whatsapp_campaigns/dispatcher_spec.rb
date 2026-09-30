@@ -57,6 +57,38 @@ RSpec.describe WhatsappCampaigns::Dispatcher do
     expect(recipient.whatsapp_message).to be_nil
   end
 
+  it "con una plantilla opt_in_request, envía a un contacto sin opt-in en vez de saltarlo" do
+    opt_in_template = create(:whatsapp_template, :opt_in_request, tenant: tenant,
+                              meta_template_name: "confirmacion_contacto_whatsapp", language: "es_CO",
+                              variable_labels: ["Nombre"], variable_names: ["primer_nombre"])
+    opt_in_campaign = create(:whatsapp_campaign, tenant: tenant, whatsapp_template: opt_in_template,
+                              variable_field_map: ["contact.first_name"], status: "running", batch_size: 10)
+    contact.update!(whatsapp_opt_in_at: nil)
+    recipient = create(:whatsapp_campaign_recipient, tenant: tenant, whatsapp_campaign: opt_in_campaign,
+                        contact: contact, status: "pending")
+
+    described_class.call(campaign: opt_in_campaign)
+
+    expect(recipient.reload.status).to eq("sent")
+    expect(recipient.whatsapp_message).to be_present
+    expect(opt_in_campaign.reload.sent_count).to eq(1)
+  end
+
+  it "salta a quien respondió \"No\" después del lanzamiento, aunque la plantilla sea opt_in_request" do
+    opt_in_template = create(:whatsapp_template, :opt_in_request, tenant: tenant, variable_labels: ["Nombre"])
+    opt_in_campaign = create(:whatsapp_campaign, tenant: tenant, whatsapp_template: opt_in_template,
+                                                 variable_field_map: ["contact.first_name"], status: "running")
+    recipient = create(:whatsapp_campaign_recipient, tenant: tenant, whatsapp_campaign: opt_in_campaign,
+                                                     contact: contact, status: "pending")
+    contact.mark_whatsapp_opt_out!(source: "reply")
+
+    described_class.call(campaign: opt_in_campaign)
+
+    expect(recipient.reload.status).to eq("skipped_no_opt_in")
+    expect(recipient.skip_reason).to eq("no autorizó WhatsApp (opt-out)")
+    expect(recipient.whatsapp_message).to be_nil
+  end
+
   it "salta contactos sin teléfono" do
     no_phone_contact = create(:contact, :without_phone, tenant: tenant, whatsapp_opt_in_at: Time.current)
     recipient = create(:whatsapp_campaign_recipient, tenant: tenant, whatsapp_campaign: campaign,

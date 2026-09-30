@@ -12,7 +12,7 @@ class WhatsappMessageSerializer < ApplicationSerializer
   attributes :direction, :provider, :provider_message_id, :status,
              :from_number, :to_number, :body, :media_url,
              :message_type, :template_name, :template_language, :template_params,
-             :sent_at, :delivered_at, :read_at, :error_message,
+             :sent_at, :delivered_at, :read_at, :error_message, :automated,
              :created_at, :updated_at
 
   attribute :data_classification do |m|

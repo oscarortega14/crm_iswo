@@ -37,7 +37,7 @@ if ENV["LOCKBOX_MASTER_KEY"].present?
 elsif Rails.env.production? && ENV["SECRET_KEY_BASE_DUMMY"].blank?
   # En producción no arrancamos sin clave: cifrar integraciones/exports lanzaría
   # 500 en runtime. Mejor fallar fuerte y temprano (SECRET_KEY_BASE_DUMMY excluye
-  # el paso de build de imagen). Defínela en los secretos de Kamal (config/deploy.yml).
+  # el paso de build de imagen). Defínela en Dokku: dokku config:set (ver docs/DEPLOY_DOKKU.md).
   raise "[Lockbox] Falta LOCKBOX_MASTER_KEY en producción (cifrado de integraciones/exports)."
 else
   Rails.logger.warn(

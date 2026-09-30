@@ -10,7 +10,7 @@ module Api
     # en manos de cada consultor sin supervisión.
     # ========================================================================
     class WhatsappCampaignsController < BaseController
-      before_action :set_campaign, only: %i[show update launch pause resume cancel]
+      before_action :set_campaign, only: %i[show update launch pause resume cancel duplicate recipients]
 
       def index
         authorize WhatsappCampaign
@@ -23,6 +23,24 @@ module Api
         render_resource(@campaign, with: WhatsappCampaignSerializer)
       end
 
+      # GET /api/v1/whatsapp_campaigns/:id/recipients — detalle por destinatario
+      # (resultado real según Meta y motivo si falló u omitió).
+      def recipients
+        authorize @campaign, :show?
+        scope = @campaign.whatsapp_campaign_recipients.includes(:contact, :whatsapp_message).order(:id)
+        render_collection(scope, with: WhatsappCampaignRecipientSerializer)
+      end
+
+      # POST /api/v1/whatsapp_campaigns/:id/duplicate — copia como borrador editable
+      # (la forma de «editar» una campaña ya lanzada).
+      def duplicate
+        authorize @campaign, :create?
+        copy = @campaign.duplicate!(current_user)
+        render_created(copy, with: WhatsappCampaignSerializer)
+      rescue ActiveRecord::RecordInvalid => e
+        render_unprocessable(e.record)
+      end
+
       # GET /api/v1/whatsapp_campaigns/audience_preview?<mismos params que /opportunities>
       def audience_preview
         authorize WhatsappCampaign, :create?
@@ -31,7 +49,8 @@ module Api
         total    = contacts.count
         opted_in = contacts.opted_in_for_whatsapp.count
 
-        render json: { total: total, opted_in: opted_in, skipped_no_opt_in: total - opted_in }
+        render json: { total: total, opted_in: opted_in, skipped_no_opt_in: total - opted_in,
+                       countries: WhatsappCampaigns::AudienceResolver.countries(contacts) }
       end
 
       def create
@@ -94,13 +113,14 @@ module Api
 
       def campaign_params
         params.require(:whatsapp_campaign).permit(
-          :name, :whatsapp_template_id, :batch_size, :batch_interval_minutes,
+          :name, :whatsapp_template_id, :batch_size, :batch_interval_minutes, :confirm_reply_body,
           variable_field_map: [], audience_filters: {}
         )
       end
 
       def audience_filter_params
-        params.permit(:status, :pipeline_id, :pipeline_stage_id, :stage_id, :owner_id, :temperature)
+        params.permit(:status, :pipeline_id, :pipeline_stage_id, :stage_id, :owner_id, :temperature, :whatsapp_consent,
+                      :contact_origin)
       end
     end
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_121000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -26,13 +26,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.text "last_error_message"
     t.datetime "last_sync_at"
     t.jsonb "metadata", default: {}, null: false
-    t.string "provider", null: false, comment: "meta | google | twilio | whatsapp_cloud"
+    t.string "provider", null: false, comment: "meta | google | whatsapp_cloud | openwa"
     t.string "status", default: "active", null: false, comment: "active | paused | error | revoked"
     t.bigint "tenant_id", null: false
     t.datetime "updated_at", null: false
     t.index ["status"], name: "index_ad_integrations_on_status"
     t.index ["tenant_id", "provider"], name: "index_ad_integrations_on_tenant_id_and_provider", unique: true
     t.index ["tenant_id"], name: "index_ad_integrations_on_tenant_id"
+  end
+
+  create_table "ai_agent_runs", force: :cascade do |t|
+    t.bigint "contact_id", null: false
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.integer "input_tokens", default: 0, null: false
+    t.string "model"
+    t.integer "output_tokens", default: 0, null: false
+    t.bigint "reply_message_id"
+    t.string "status", null: false, comment: "replied | handoff | skipped | error"
+    t.bigint "tenant_id", null: false
+    t.jsonb "tool_calls", default: [], null: false, comment: "[{name, arguments, result}]"
+    t.bigint "trigger_message_id"
+    t.datetime "updated_at", null: false
+    t.index ["contact_id", "created_at"], name: "index_ai_agent_runs_on_contact_id_and_created_at"
+    t.index ["contact_id"], name: "index_ai_agent_runs_on_contact_id"
+    t.index ["reply_message_id"], name: "index_ai_agent_runs_on_reply_message_id"
+    t.index ["tenant_id", "created_at"], name: "index_ai_agent_runs_on_tenant_id_and_created_at"
+    t.index ["tenant_id"], name: "index_ai_agent_runs_on_tenant_id"
+    t.index ["trigger_message_id"], name: "index_ai_agent_runs_on_trigger_message_id"
   end
 
   create_table "audit_events", force: :cascade do |t|
@@ -80,11 +101,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.string "document_id_bidx"
     t.text "document_id_ciphertext"
     t.string "email"
+    t.datetime "email_opt_out_at"
+    t.string "email_opt_out_source", comment: "unsubscribe | bounce | complaint | manual"
     t.string "first_name"
     t.string "job_title"
     t.string "kind", default: "person", null: false, comment: "person | company"
     t.string "last_name"
     t.text "notes"
+    t.jsonb "origins", default: [], null: false, comment: "Orígenes del contacto [{kind, label, at}] (incluye los de contactos fusionados)"
     t.bigint "owner_user_id"
     t.string "phone_e164", comment: "Formato E.164 (+57…)"
     t.string "phone_e164_bidx"
@@ -94,11 +118,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.string "source_label"
     t.bigint "tenant_id", null: false
     t.datetime "updated_at", null: false
+    t.datetime "whatsapp_automation_paused_at", comment: "un asesor tomó el control del chat: no enviar respuestas automáticas"
     t.datetime "whatsapp_opt_in_at"
-    t.string "whatsapp_opt_in_source", comment: "manual | import | form | reply_stop_in"
+    t.string "whatsapp_opt_in_source", comment: "manual | import | form | reply_stop_in | reply_confirm"
+    t.datetime "whatsapp_opt_out_at"
+    t.string "whatsapp_opt_out_source", comment: "reply | manual"
     t.index "((((COALESCE(first_name, ''::character varying))::text || ' '::text) || (COALESCE(last_name, ''::character varying))::text)) gin_trgm_ops", name: "index_contacts_on_full_name_trgm", using: :gin
     t.index "tenant_id, lower((email)::text)", name: "index_contacts_on_lower_email", where: "((email IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["discarded_at"], name: "index_contacts_on_discarded_at"
+    t.index ["email_opt_out_at"], name: "index_contacts_on_email_opt_out_at"
     t.index ["owner_user_id"], name: "index_contacts_on_owner_user_id"
     t.index ["tenant_id", "document_id_bidx"], name: "index_contacts_on_tenant_id_and_document_id_bidx", where: "((document_id_bidx IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["tenant_id", "email"], name: "index_contacts_on_tenant_id_and_email"
@@ -106,6 +134,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.index ["tenant_id", "phone_e164_bidx"], name: "index_contacts_on_tenant_id_and_phone_e164_bidx", where: "((phone_e164_bidx IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["tenant_id"], name: "index_contacts_on_tenant_id"
     t.index ["whatsapp_opt_in_at"], name: "index_contacts_on_whatsapp_opt_in_at"
+    t.index ["whatsapp_opt_out_at"], name: "index_contacts_on_whatsapp_opt_out_at"
   end
 
   create_table "duplicate_flags", force: :cascade do |t|
@@ -128,6 +157,59 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.index ["resolved_by_user_id"], name: "index_duplicate_flags_on_resolved_by_user_id"
     t.index ["tenant_id", "resolution"], name: "index_duplicate_flags_on_tenant_id_and_resolution"
     t.index ["tenant_id"], name: "index_duplicate_flags_on_tenant_id"
+  end
+
+  create_table "email_campaign_recipients", force: :cascade do |t|
+    t.datetime "bounced_at"
+    t.datetime "clicked_at"
+    t.datetime "complained_at"
+    t.bigint "contact_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "delivered_at"
+    t.string "email", null: false
+    t.bigint "email_campaign_id", null: false
+    t.datetime "opened_at"
+    t.bigint "opportunity_id"
+    t.datetime "sent_at"
+    t.string "ses_message_id"
+    t.text "skip_reason"
+    t.string "status", default: "pending", null: false, comment: "pending | sent | delivered | bounced | complained | failed | skipped"
+    t.bigint "tenant_id", null: false
+    t.datetime "unsubscribed_at"
+    t.datetime "updated_at", null: false
+    t.index ["contact_id"], name: "index_email_campaign_recipients_on_contact_id"
+    t.index ["email_campaign_id", "contact_id"], name: "index_email_campaign_recipients_unique_contact", unique: true
+    t.index ["email_campaign_id", "status"], name: "idx_on_email_campaign_id_status_90909c2255"
+    t.index ["email_campaign_id"], name: "index_email_campaign_recipients_on_email_campaign_id"
+    t.index ["opportunity_id"], name: "index_email_campaign_recipients_on_opportunity_id"
+    t.index ["ses_message_id"], name: "index_email_campaign_recipients_on_ses_message_id", unique: true, where: "(ses_message_id IS NOT NULL)"
+    t.index ["tenant_id"], name: "index_email_campaign_recipients_on_tenant_id"
+  end
+
+  create_table "email_campaigns", force: :cascade do |t|
+    t.jsonb "audience_filters", default: {}, null: false
+    t.integer "batch_size", default: 200, null: false
+    t.jsonb "body_design", default: {}, null: false, comment: "proyecto del editor visual para reabrirlo"
+    t.text "body_html", comment: "HTML final (estilos en línea) con variables {{nombre}}…"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.bigint "created_by_user_id"
+    t.integer "failed_count", default: 0, null: false
+    t.datetime "last_batch_at"
+    t.string "name", null: false
+    t.string "preheader", comment: "texto de vista previa en la bandeja"
+    t.datetime "scheduled_at"
+    t.integer "sent_count", default: 0, null: false
+    t.integer "skipped_count", default: 0, null: false
+    t.datetime "started_at"
+    t.string "status", default: "draft", null: false, comment: "draft | scheduled | running | paused | completed | canceled"
+    t.string "subject"
+    t.bigint "tenant_id", null: false
+    t.integer "total_recipients", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_user_id"], name: "index_email_campaigns_on_created_by_user_id"
+    t.index ["tenant_id", "status"], name: "index_email_campaigns_on_tenant_id_and_status"
+    t.index ["tenant_id"], name: "index_email_campaigns_on_tenant_id"
   end
 
   create_table "exports", force: :cascade do |t|
@@ -584,6 +666,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   end
 
   create_table "whatsapp_campaign_recipients", force: :cascade do |t|
+    t.bigint "confirm_reply_message_id"
+    t.datetime "confirmed_at", comment: "respondió «Sí» a esta campaña"
     t.bigint "contact_id", null: false
     t.datetime "created_at", null: false
     t.bigint "opportunity_id"
@@ -593,6 +677,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.datetime "updated_at", null: false
     t.bigint "whatsapp_campaign_id", null: false
     t.bigint "whatsapp_message_id"
+    t.index ["confirm_reply_message_id"], name: "index_whatsapp_campaign_recipients_on_confirm_reply_message_id"
     t.index ["contact_id"], name: "index_whatsapp_campaign_recipients_on_contact_id"
     t.index ["opportunity_id"], name: "index_whatsapp_campaign_recipients_on_opportunity_id"
     t.index ["tenant_id"], name: "index_whatsapp_campaign_recipients_on_tenant_id"
@@ -607,6 +692,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.integer "batch_interval_minutes", default: 15, null: false
     t.integer "batch_size", default: 40, null: false
     t.datetime "completed_at"
+    t.text "confirm_reply_body", comment: "mensaje automático a quien responde «Sí»; admite {{nombre}}"
     t.datetime "created_at", null: false
     t.bigint "created_by_user_id"
     t.integer "failed_count", default: 0, null: false
@@ -628,6 +714,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   end
 
   create_table "whatsapp_messages", force: :cascade do |t|
+    t.boolean "automated", default: false, null: false, comment: "enviado por una automatización (no por una persona)"
     t.text "body"
     t.bigint "contact_id"
     t.datetime "created_at", null: false
@@ -639,7 +726,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
     t.string "media_url"
     t.string "message_type", default: "text", null: false, comment: "text | template"
     t.bigint "opportunity_id"
-    t.string "provider", null: false, comment: "twilio | whatsapp_cloud"
+    t.string "provider", null: false, comment: "whatsapp_cloud | openwa"
     t.string "provider_message_id"
     t.jsonb "raw_payload", default: {}, null: false
     t.datetime "read_at"
@@ -666,10 +753,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
 
   create_table "whatsapp_templates", force: :cascade do |t|
     t.boolean "active", default: true, null: false
+    t.string "category"
     t.datetime "created_at", null: false
     t.string "language", null: false
+    t.string "meta_status"
+    t.datetime "meta_synced_at"
+    t.string "meta_template_id"
     t.string "meta_template_name", null: false
     t.string "name", null: false
+    t.boolean "opt_in_request", default: false, null: false
     t.bigint "tenant_id", null: false
     t.datetime "updated_at", null: false
     t.jsonb "variable_labels", default: [], null: false
@@ -679,6 +771,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   end
 
   add_foreign_key "ad_integrations", "tenants"
+  add_foreign_key "ai_agent_runs", "contacts"
+  add_foreign_key "ai_agent_runs", "tenants"
+  add_foreign_key "ai_agent_runs", "whatsapp_messages", column: "reply_message_id", on_delete: :nullify
+  add_foreign_key "ai_agent_runs", "whatsapp_messages", column: "trigger_message_id", on_delete: :nullify
   add_foreign_key "audit_events", "tenants"
   add_foreign_key "audit_events", "users"
   add_foreign_key "bant_criteria", "tenants"
@@ -689,6 +785,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   add_foreign_key "duplicate_flags", "tenants"
   add_foreign_key "duplicate_flags", "users", column: "detected_by_user_id"
   add_foreign_key "duplicate_flags", "users", column: "resolved_by_user_id"
+  add_foreign_key "email_campaign_recipients", "contacts"
+  add_foreign_key "email_campaign_recipients", "email_campaigns"
+  add_foreign_key "email_campaign_recipients", "opportunities"
+  add_foreign_key "email_campaign_recipients", "tenants"
+  add_foreign_key "email_campaigns", "tenants"
+  add_foreign_key "email_campaigns", "users", column: "created_by_user_id"
   add_foreign_key "exports", "tenants"
   add_foreign_key "exports", "users"
   add_foreign_key "landing_form_submissions", "contacts"
@@ -730,6 +832,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_120000) do
   add_foreign_key "whatsapp_campaign_recipients", "tenants"
   add_foreign_key "whatsapp_campaign_recipients", "whatsapp_campaigns"
   add_foreign_key "whatsapp_campaign_recipients", "whatsapp_messages"
+  add_foreign_key "whatsapp_campaign_recipients", "whatsapp_messages", column: "confirm_reply_message_id"
   add_foreign_key "whatsapp_campaigns", "tenants"
   add_foreign_key "whatsapp_campaigns", "users", column: "created_by_user_id"
   add_foreign_key "whatsapp_campaigns", "whatsapp_templates"

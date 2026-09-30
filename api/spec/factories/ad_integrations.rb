@@ -11,7 +11,6 @@ FactoryBot.define do
 
     trait :meta   do provider { "meta"           } end
     trait :google do provider { "google"         } end
-    trait :twilio do provider { "twilio"         } end
     trait :cloud  do provider { "whatsapp_cloud" } end
     trait :openwa do provider { "openwa"         } end
 

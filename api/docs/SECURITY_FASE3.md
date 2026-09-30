@@ -32,8 +32,8 @@ Política `crm_tenant_isolation` en 19 tablas con `tenant_id`.
 ## Producción
 
 1. Usuario BD dedicado `crm_iswo` (no superuser, sin `BYPASSRLS`).
-2. `DB_RLS_ENABLED=true` en Kamal.
-3. Migraciones con usuario owner; app con `crm_iswo`.
+2. `DB_RLS_ENABLED=true` en Dokku (`dokku config:set`).
+3. Migraciones con usuario owner; app con `crm_iswo` (ver "Migraciones" en `docs/DEPLOY_DOKKU.md`).
 
 Opcional endurecimiento:
 

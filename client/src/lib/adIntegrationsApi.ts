@@ -6,7 +6,7 @@ import {
 } from '@/lib/opportunityApi'
 
 /** Coincide con `AdIntegration::PROVIDERS` en el API */
-export type AdIntegrationProvider = 'meta' | 'google' | 'twilio' | 'whatsapp_cloud' | 'openwa'
+export type AdIntegrationProvider = 'meta' | 'google' | 'whatsapp_cloud' | 'openwa'
 
 export type AdIntegrationStatus = 'active' | 'paused' | 'error' | 'revoked'
 
@@ -55,7 +55,6 @@ export interface IntegrationWebhookUrls {
   meta_verify_get: string
   meta_leads_post: string
   google_leads_post: string
-  whatsapp_twilio_post: string
   whatsapp_cloud_verify_get: string
   whatsapp_cloud_post: string
   whatsapp_openwa_post: string

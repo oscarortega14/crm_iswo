@@ -61,6 +61,8 @@ class Contact < ApplicationRecord
   has_many :landing_form_submissions, dependent: :nullify
   has_many :whatsapp_messages, dependent: :nullify
   has_many :whatsapp_campaign_recipients, dependent: :destroy
+  has_many :email_campaign_recipients, dependent: :destroy
+  has_many :ai_agent_runs, dependent: :delete_all
 
   # ---- Validaciones ---------------------------------------------------------
   validates :kind, inclusion: { in: KINDS }
@@ -70,6 +72,7 @@ class Contact < ApplicationRecord
 
   # ---- Callbacks ------------------------------------------------------------
   before_validation :normalize_email_and_phone
+  before_create :seed_origins
   # Soft-delete en cascada: `dependent: :destroy` solo aplica al destroy real,
   # así que sin esto las oportunidades de un contacto descartado siguen
   # contando en /opportunities, kanban y dashboard.
@@ -86,6 +89,60 @@ class Contact < ApplicationRecord
     SQL
   }
   scope :opted_in_for_whatsapp, -> { where.not(whatsapp_opt_in_at: nil) }
+  # Respondió "Sí" por WhatsApp (ver WhatsApp::ConsentReply); no basta el
+  # opt-in por import/manual.
+  scope :whatsapp_confirmed, lambda {
+    where(whatsapp_opt_in_source: "reply_confirm", whatsapp_opt_out_at: nil).where.not(whatsapp_opt_in_at: nil)
+  }
+  scope :whatsapp_opted_out, -> { where.not(whatsapp_opt_out_at: nil) }
+  # Dijo «Sí» por WhatsApp y ninguna persona le ha escrito después (los
+  # mensajes automáticos no cuentan): está esperando que un asesor le responda.
+  scope :whatsapp_awaiting_reply, lambda {
+    whatsapp_confirmed.where(<<~SQL.squish)
+      NOT EXISTS (
+        SELECT 1 FROM whatsapp_messages m
+        WHERE m.contact_id = contacts.id AND m.direction = 'out' AND m.automated = FALSE
+          AND m.created_at > contacts.whatsapp_opt_in_at
+      )
+    SQL
+  }
+
+  # Con correo y sin baja de correos de marketing (baja, rebote o queja).
+  scope :email_marketable, lambda {
+    where.not(email: [ nil, "" ]).where(email_opt_out_at: nil)
+  }
+
+  # Por dónde llegó (landing, «Excel: base.xlsx», WhatsApp…): el origen
+  # principal o cualquiera de los acumulados (incluye contactos fusionados).
+  scope :with_origin, lambda { |label|
+    where(source_label: label).or(where("contacts.origins @> ?", [ { label: label } ].to_json))
+  }
+
+  # [{ label:, kind:, count: }] de los orígenes principales, más frecuentes primero.
+  def self.origin_options(limit: 100)
+    kept.where.not(source_label: [ nil, "" ])
+        .group(:source_label, :source_kind).order(Arel.sql("COUNT(*) DESC")).limit(limit).count
+        .map { |(label, kind), count| { label: label, kind: kind, count: count } }
+  end
+
+  WHATSAPP_CONSENT_FILTERS = %w[confirmed opted_out unconfirmed none].freeze
+
+  # Filtro de /contacts por consentimiento de WhatsApp:
+  #   confirmed   → respondió "Sí"
+  #   opted_out   → respondió "No" (o se marcó "No autoriza")
+  #   unconfirmed → tiene opt-in (import/manual/mensaje) pero no confirmó "Sí"
+  #   none        → sin opt-in ni opt-out
+  def self.filter_by_whatsapp_consent(value)
+    case value.to_s
+    when "confirmed"   then whatsapp_confirmed
+    when "opted_out"   then whatsapp_opted_out
+    when "unconfirmed"
+      opted_in_for_whatsapp.where(whatsapp_opt_out_at: nil)
+                           .where("contacts.whatsapp_opt_in_source IS DISTINCT FROM ?", "reply_confirm")
+    when "none" then where(whatsapp_opt_in_at: nil, whatsapp_opt_out_at: nil)
+    else all
+    end
+  end
 
   # ---- Helpers --------------------------------------------------------------
   def display_name
@@ -103,6 +160,17 @@ class Contact < ApplicationRecord
   end
 
   # Evita 500 en listados si hay ciphertext corrupto (encrypt fallido previo).
+  # Registra una vía de entrada (landing, importación, WhatsApp…) si no estaba ya
+  # (mismo kind + label). No toca updated_at ni dispara callbacks.
+  def record_origin!(kind, label = nil, at: Time.current)
+    return if kind.blank? || new_record?
+
+    list = Array(origins)
+    return if list.any? { |o| o["kind"] == kind.to_s && o["label"].to_s == label.to_s }
+
+    update_column(:origins, list + [ { "kind" => kind.to_s, "label" => label.presence, "at" => at.utc.iso8601 }.compact ])
+  end
+
   def phone_e164_safe
     phone_e164
   rescue Lockbox::DecryptionError, Lockbox::Error
@@ -130,18 +198,60 @@ class Contact < ApplicationRecord
     whatsapp_opt_in_at.present?
   end
 
+  # El contacto dijo explícitamente que NO quiere WhatsApp. Bloquea toda
+  # campaña, incluidas las de solicitud de opt-in.
+  def whatsapp_opted_out?
+    whatsapp_opt_out_at.present?
+  end
+
+  # Opt-in explícito (manual, "Sí autorizo", import…): limpia un opt-out previo.
   def mark_whatsapp_opt_in!(source:)
-    update!(whatsapp_opt_in_at: Time.current, whatsapp_opt_in_source: source)
+    update!(whatsapp_opt_in_at: Time.current, whatsapp_opt_in_source: source,
+            whatsapp_opt_out_at: nil, whatsapp_opt_out_source: nil)
+  end
+
+  def mark_whatsapp_opt_out!(source:)
+    update!(whatsapp_opt_in_at: nil, whatsapp_opt_out_at: Time.current, whatsapp_opt_out_source: source)
   end
 
   def revoke_whatsapp_opt_in!
     update!(whatsapp_opt_in_at: nil)
   end
 
+  # Un asesor tomó el control del chat: no se envían respuestas automáticas.
+  def whatsapp_automation_paused?
+    whatsapp_automation_paused_at.present?
+  end
+
+  EMAIL_OPT_OUT_SOURCES = %w[unsubscribe bounce complaint manual].freeze
+
+  # Se dio de baja de las campañas de correo, rebotó de forma permanente o lo
+  # marcó como spam. No afecta los correos del sistema ni WhatsApp.
+  def email_opted_out?
+    email_opt_out_at.present?
+  end
+
+  # Idempotente: conserva la primera fecha y motivo.
+  def mark_email_opt_out!(source:)
+    return if email_opted_out?
+
+    update_columns(email_opt_out_at: Time.current, email_opt_out_source: source.to_s, updated_at: Time.current)
+  end
+
+  def clear_email_opt_out!
+    update_columns(email_opt_out_at: nil, email_opt_out_source: nil, updated_at: Time.current)
+  end
+
   private
 
   def discard_opportunities
     opportunities.kept.discard_all
+  end
+
+  def seed_origins
+    return if Array(origins).any? || source_kind.blank?
+
+    self.origins = [ { "kind" => source_kind, "label" => source_label.presence, "at" => Time.current.utc.iso8601 }.compact ]
   end
 
   def normalize_email_and_phone

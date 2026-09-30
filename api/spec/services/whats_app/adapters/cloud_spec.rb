@@ -122,6 +122,30 @@ RSpec.describe WhatsApp::Adapters::Cloud do
       expect(stub).to have_been_requested
     end
 
+    it "construye payload con parameter_name cuando la plantilla usa variables con nombre (Meta)" do
+      template_message = create(:whatsapp_message, :outbound, :cloud,
+                                 tenant: tenant, to_number: "+573001112233", body: nil,
+                                 message_type: "template", template_name: "primer_contacto",
+                                 template_language: "es_CO", template_params: ["Oscar"],
+                                 template_variable_names: ["primer_nombre"])
+
+      stub = stub_request(:post, endpoint)
+             .with(body: hash_including(
+               "template" => hash_including(
+                 "components" => [{
+                   "type" => "body",
+                   "parameters" => [{ "type" => "text", "parameter_name" => "primer_nombre", "text" => "Oscar" }]
+                 }]
+               )
+             ))
+             .to_return(status: 200,
+                        body: { messages: [{ id: "wamid.named" }] }.to_json,
+                        headers: { "Content-Type" => "application/json" })
+
+      adapter.deliver(template_message)
+      expect(stub).to have_been_requested
+    end
+
     it "omite components cuando la plantilla no tiene variables" do
       template_message = create(:whatsapp_message, :outbound, :cloud,
                                  tenant: tenant, to_number: "+573001112233", body: nil,
@@ -173,6 +197,33 @@ RSpec.describe WhatsApp::Adapters::Cloud do
                         ))
       expect { adapter.deliver(message) }
         .to raise_error(WhatsApp::MessageSender::DeliveryError, /Credenciales WhatsApp Cloud/)
+    end
+  end
+
+  describe "#mark_read («visto»)" do
+    it "envía status=read con el message_id de Meta" do
+      stub = stub_request(:post, endpoint)
+             .with(
+               headers: { "Authorization" => "Bearer EAAG..." },
+               body:    { messaging_product: "whatsapp", status: "read", message_id: "wamid.ABC" }.to_json
+             )
+             .to_return(status: 200, body: { success: true }.to_json, headers: { "Content-Type" => "application/json" })
+
+      expect(adapter.mark_read("wamid.ABC")).to be(true)
+      expect(stub).to have_been_requested
+    end
+
+    it "devuelve false (sin levantar error) si Meta rechaza" do
+      stub_request(:post, endpoint)
+        .to_return(status: 400, body: { error: { message: "Invalid parameter" } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      expect(adapter.mark_read("wamid.VIEJO")).to be(false)
+    end
+
+    it "no llama a Meta sin message_id" do
+      expect(adapter.mark_read(nil)).to be(false)
+      expect(a_request(:post, endpoint)).not_to have_been_made
     end
   end
 end

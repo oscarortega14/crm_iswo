@@ -40,6 +40,10 @@ class Rack::Attack
     req.ip if req.path.start_with?("/api/v1/public/")
   end
 
+  throttle("integrations/ip", limit: 30, period: 1.minute) do |req|
+    req.ip if req.path.start_with?("/api/v1/integrations/")
+  end
+
   self.throttled_responder = lambda do |env|
     retry_after = (env["rack.attack.match_data"] || {})[:period]
     [

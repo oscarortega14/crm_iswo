@@ -19,6 +19,7 @@ class Notification < ApplicationRecord
     reminder_due reminder_created reminder_upcoming
     new_lead stage_change duplicate_found
     whatsapp_message_received
+    ai_agent_hot_lead ai_agent_handoff
   ].freeze
   enum :kind, KINDS.zip(KINDS).to_h, prefix: true, default: "reminder_due"
 

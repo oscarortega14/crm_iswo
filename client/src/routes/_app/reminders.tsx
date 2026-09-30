@@ -59,6 +59,7 @@ import {
   canUseReminders,
   reminderChannelLabel,
 } from '@/lib/reminderChannels'
+import { statGridClass } from '@/lib/layoutClasses'
 
 const groupOrder = ['Atrasados', 'Hoy', 'Manana', 'Proximos']
 
@@ -236,7 +237,7 @@ function RemindersPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className={`${statGridClass} md:grid-cols-4`}>
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">

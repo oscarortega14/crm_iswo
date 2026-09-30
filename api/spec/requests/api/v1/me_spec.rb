@@ -38,5 +38,19 @@ RSpec.describe "Api::V1::Me", type: :request do
       # no explota (status 200 o 422 según validaciones del modelo User)
       expect([200, 422]).to include(response.status)
     end
+
+    it "registra AuditEvent con el diff redactado (ISO A.8.16)" do
+      expect {
+        patch "/api/v1/me",
+              headers: auth_headers(user),
+              params: { user: { phone: "+573001112233" } }.to_json
+      }.to change(AuditEvent, :count).by(1)
+
+      event = AuditEvent.last
+      expect(event.action).to      eq("update")
+      expect(event.entity_type).to eq("User")
+      expect(event.entity_id).to   eq(user.id)
+      expect(event.metadata.dig("changes", "phone")).to eq("[REDACTED]")
+    end
   end
 end

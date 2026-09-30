@@ -39,4 +39,16 @@ RSpec.describe WhatsappTemplatePolicy do
       expect(described_class.new(consultant, template).destroy?).to be(false)
     end
   end
+
+  describe "sync?" do
+    it "permite a admin y manager" do
+      expect(described_class.new(admin,   template).sync?).to be(true)
+      expect(described_class.new(manager, template).sync?).to be(true)
+    end
+
+    it "deniega a consultant y viewer" do
+      expect(described_class.new(consultant, template).sync?).to be(false)
+      expect(described_class.new(viewer,     template).sync?).to be(false)
+    end
+  end
 end
