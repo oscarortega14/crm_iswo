@@ -28,6 +28,7 @@ class Tenant < ApplicationRecord
   has_many :whatsapp_campaigns,     dependent: :destroy
   has_many :email_campaigns,        dependent: :destroy
   has_many :ai_agent_runs,          dependent: :delete_all
+  has_many :appointments,           dependent: :destroy
   has_many :exports,                dependent: :destroy
   has_many :audit_events,           dependent: :nullify
   has_one  :bant_criterion,         dependent: :destroy

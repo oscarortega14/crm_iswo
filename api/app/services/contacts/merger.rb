@@ -111,6 +111,7 @@ module Contacts
         opportunities:            Opportunity.where(contact_id: id_from).update_all(contact_id: id_to),
         whatsapp_messages:        WhatsappMessage.where(contact_id: id_from).update_all(contact_id: id_to),
         email_recipients:         move_email_recipients!,
+        appointments:             Appointment.where(contact_id: id_from).update_all(contact_id: id_to),
         landing_form_submissions: LandingFormSubmission.where(contact_id: id_from).update_all(contact_id: id_to),
         notifications:            Notification.where(resource_type: "Contact", resource_id: id_from)
                                               .update_all(resource_id: id_to)

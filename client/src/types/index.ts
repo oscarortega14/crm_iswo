@@ -136,7 +136,7 @@ export interface PipelineStage {
   auto_trigger?: StageAutoTrigger | null
 }
 
-export type StageAutoTrigger = 'whatsapp_outbound' | 'whatsapp_inbound' | 'bant_qualified'
+export type StageAutoTrigger = 'whatsapp_outbound' | 'whatsapp_inbound' | 'bant_qualified' | 'appointment_scheduled'
 
 // Contact Types
 export type ContactKind = 'person' | 'company'

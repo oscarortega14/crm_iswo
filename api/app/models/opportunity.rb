@@ -51,6 +51,7 @@ class Opportunity < ApplicationRecord
   has_many :whatsapp_messages, dependent: :nullify
   has_many :duplicate_flags,  dependent: :destroy
   has_many :landing_form_submissions, dependent: :nullify
+  has_many :appointments, dependent: :nullify
 
   # Duplicados donde ESTA oportunidad es la "ganadora"
   has_many :duplicate_flags_as_original,

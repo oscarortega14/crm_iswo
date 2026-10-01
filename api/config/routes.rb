@@ -211,6 +211,9 @@ Rails.application.routes.draw do
         post :test
         get  :activity
         post :chats # { paused: true|false } — pausar / reanudar en todos los chats
+        post :calendar_test
+        get  :appointments
+        post "appointments/:id/cancel", action: :cancel_appointment, as: :cancel_appointment
       end
 
       # ---- Email marketing (AWS SES, dominio propio del tenant) ---------------

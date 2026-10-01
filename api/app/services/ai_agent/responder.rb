@@ -51,7 +51,7 @@ module AiAgent
 
       opportunity = contact.opportunities.kept.where.not(status: %w[won lost merged])
                            .order(last_activity_at: :desc).first
-      tools = Tools.new(contact: contact, opportunity: opportunity)
+      tools = Tools.new(contact: contact, opportunity: opportunity, scheduler: scheduler)
       messages = [ system_message(contact, opportunity) ] + history(contact)
 
       reply, calls, usage = converse(messages, tools)
@@ -66,7 +66,7 @@ module AiAgent
 
     def preview(conversation)
       contact = @tenant.contacts.new(first_name: "Cliente de prueba")
-      tools = Tools.new(contact: contact, opportunity: nil, dry_run: true)
+      tools = Tools.new(contact: contact, opportunity: nil, dry_run: true, scheduler: scheduler)
       history = Array(conversation).last(HISTORY_MESSAGES).map do |m|
         { role: m["role"] == "assistant" ? "assistant" : "user", content: m["content"].to_s.truncate(2000) }
       end
@@ -156,15 +156,46 @@ module AiAgent
 
         # Cuándo pasar a un asesor
         #{@config.handoff_rules}
-        Si el cliente quiere agendar una reunión o visita, pregúntale qué día y hora le queda bien y usa
-        pasar_a_asesor indicando esa preferencia, para que un asesor la confirme.
+        #{scheduling_instructions}
         Al pasar a un asesor, avísale al cliente que una persona del equipo le responderá pronto.
 
         # Lo que ya sabemos del cliente
         #{known.any? ? known.map { |k, v| "- #{k}: #{v}" }.join("\n") : "- Aún no tenemos sus datos."}
         #{"- Etapa actual en el proceso comercial: #{opportunity.pipeline_stage&.name}" if opportunity}
+        #{upcoming_line(contact)}
       PROMPT
       { role: "system", content: content.squeeze("\n").strip }
+    end
+
+    def scheduler
+      return @scheduler if defined?(@scheduler)
+
+      @scheduler = @config.calendar_active? ? Scheduler.new(@tenant) : nil
+    end
+
+    def scheduling_instructions
+      if scheduler
+        minutes = @config.calendar["duration_minutes"]
+        <<~TEXT.strip
+          Puedes agendar reuniones de #{minutes} minutos con un asesor. Cuando el cliente quiera una reunión:
+          1) usa consultar_disponibilidad (con «desde» si pidió un día), 2) ofrécele 2 o 3 horarios de la lista,
+          3) cuando elija, usa agendar_cita con el inicio exacto de la lista y confirma fecha y hora.
+          Si quiere cambiar o cancelar su cita, usa reprogramar_cita o cancelar_cita.
+          #{"Lugar o enlace de la reunión: #{@config.calendar['location']}" if @config.calendar['location'].present?}
+        TEXT
+      else
+        "Si el cliente quiere agendar una reunión o visita, pregúntale qué día y hora le queda bien y usa " \
+          "pasar_a_asesor indicando esa preferencia, para que un asesor la confirme."
+      end
+    end
+
+    def upcoming_line(contact)
+      return "" if contact.new_record?
+
+      appointment = contact.appointments.upcoming.first
+      return "" unless appointment
+
+      "- Ya tiene una cita agendada: #{Scheduler.new(@tenant).label(appointment.starts_at)}"
     end
 
     def spanish_datetime(time)

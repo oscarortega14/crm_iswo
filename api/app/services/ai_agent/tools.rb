@@ -9,6 +9,8 @@ module AiAgent
   # no se toca nada: solo se describe lo que se habría hecho.
   #
   # Fase 1: calificar_lead, guardar_datos_contacto, pasar_a_asesor.
+  # Fase 2 (si la agenda está activa, AiAgent::Scheduler): consultar_disponibilidad,
+  # agendar_cita, reprogramar_cita, cancelar_cita.
   # ==========================================================================
   class Tools
     TEMPERATURES = %w[cold warm hot].freeze
@@ -69,16 +71,71 @@ module AiAgent
       }
     ].freeze
 
+    CALENDAR_DEFINITIONS = [
+      {
+        type: "function",
+        function: {
+          name: "consultar_disponibilidad",
+          description: "Devuelve los próximos horarios libres para una reunión. Úsala antes de proponer horarios; " \
+                       "nunca inventes horarios.",
+          parameters: {
+            type: "object",
+            properties: {
+              desde: { type: "string", description: "Fecha desde la que buscar (AAAA-MM-DD), si el cliente pidió un día" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "agendar_cita",
+          description: "Agenda la reunión cuando el cliente ya eligió un horario. El inicio debe ser uno de los que " \
+                       "devolvió consultar_disponibilidad en este mismo turno: si no lo tienes, vuelve a consultarla " \
+                       "primero (con «desde» = el día elegido).",
+          parameters: {
+            type: "object",
+            properties: {
+              inicio: { type: "string", description: "Inicio exacto, tal como lo devolvió consultar_disponibilidad (ISO 8601)" },
+              motivo: { type: "string", description: "Tema de la reunión en una frase" }
+            },
+            required: %w[inicio]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "reprogramar_cita",
+          description: "Mueve la próxima cita del cliente a otro horario libre (de consultar_disponibilidad).",
+          parameters: {
+            type: "object",
+            properties: { nuevo_inicio: { type: "string", description: "Nuevo inicio exacto (ISO 8601)" } },
+            required: %w[nuevo_inicio]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "cancelar_cita",
+          description: "Cancela la próxima cita del cliente, solo si él lo pide explícitamente.",
+          parameters: { type: "object", properties: {} }
+        }
+      }
+    ].freeze
+
     attr_reader :handoff
 
-    def initialize(contact:, opportunity:, dry_run: false)
+    def initialize(contact:, opportunity:, dry_run: false, scheduler: nil)
       @contact     = contact
       @opportunity = opportunity
       @dry_run     = dry_run
+      @scheduler   = scheduler
       @handoff     = false
     end
 
-    def definitions = DEFINITIONS
+    def definitions = @scheduler ? DEFINITIONS + CALENDAR_DEFINITIONS : DEFINITIONS
 
     # @return [String] resultado para el modelo (texto corto)
     def call(name, args)
@@ -86,8 +143,17 @@ module AiAgent
       when "calificar_lead"         then qualify(args)
       when "guardar_datos_contacto" then save_contact(args)
       when "pasar_a_asesor"         then hand_off(args)
+      when "consultar_disponibilidad" then availability(args)
+      when "agendar_cita"           then book(args)
+      when "reprogramar_cita"       then reschedule(args)
+      when "cancelar_cita"          then cancel
       else "Herramienta desconocida: #{name}"
       end
+    rescue Scheduler::Unavailable => e
+      "#{e.message} Consulta de nuevo la disponibilidad y ofrece otros horarios."
+    rescue GoogleCalendar::Error => e
+      Rails.logger.warn("[AiAgent::Tools] #{name}: #{e.message}")
+      "La agenda no está disponible en este momento. Ofrece que un asesor confirme la reunión (pasar_a_asesor)."
     rescue StandardError => e
       Rails.logger.warn("[AiAgent::Tools] #{name}: #{e.class}: #{e.message}")
       "No se pudo completar: #{e.message.truncate(120)}"
@@ -154,6 +220,54 @@ module AiAgent
         body: "El asistente IA pasó la conversación: #{args['motivo'].to_s.truncate(160)}"
       )
       "Conversación pasada a un asesor. No vuelvas a responder en este chat."
+    end
+
+    # ---- Agenda --------------------------------------------------------------
+
+    def availability(args)
+      return "La agenda no está configurada." unless @scheduler
+
+      from = (Date.parse(args["desde"].to_s) rescue nil)
+      from = @scheduler.start_of_day(from) if from
+      slots = @scheduler.available_slots(from: from)
+      return "No hay horarios libres en los próximos días. Ofrece que un asesor confirme la reunión." if slots.empty?
+
+      "Horarios libres (ofrece 2 o 3, no todos):\n" +
+        slots.map { |s| "- #{@scheduler.label(s)} → inicio: #{s.iso8601}" }.join("\n")
+    end
+
+    def book(args)
+      return "La agenda no está configurada." unless @scheduler
+      return "Ya tiene una cita el #{@scheduler.label(upcoming.starts_at)}; usa reprogramar_cita si quiere cambiarla." if upcoming
+      return "Cita agendada (prueba) para #{args['inicio']}" if @dry_run
+
+      appointment = @scheduler.book!(contact: @contact, opportunity: @opportunity, starts_at: args["inicio"],
+                                     reason: args["motivo"])
+      "Cita agendada: #{@scheduler.label(appointment.starts_at)}. Confírmale al cliente la fecha y hora."
+    end
+
+    def reschedule(args)
+      return "La agenda no está configurada." unless @scheduler
+      return "El cliente no tiene citas próximas." unless upcoming
+      return "Cita reprogramada (prueba) para #{args['nuevo_inicio']}" if @dry_run
+
+      appointment = @scheduler.reschedule!(upcoming, args["nuevo_inicio"])
+      "Cita reprogramada: #{@scheduler.label(appointment.starts_at)}."
+    end
+
+    def cancel
+      return "La agenda no está configurada." unless @scheduler
+      return "El cliente no tiene citas próximas." unless upcoming
+      return "Cita cancelada (prueba)" if @dry_run
+
+      @scheduler.cancel!(upcoming)
+      "Cita cancelada. Pregúntale si quiere agendar en otro momento."
+    end
+
+    def upcoming
+      return nil if @contact.new_record?
+
+      @upcoming ||= @contact.appointments.upcoming.first
     end
 
     def notify_hot_lead(summary)

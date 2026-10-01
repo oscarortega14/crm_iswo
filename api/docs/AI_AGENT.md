@@ -8,7 +8,7 @@ conversación a un asesor cuando hace falta. Pantalla: **Ajustes → Asistente I
 | Fase | Estado | Qué hace |
 |---|---|---|
 | 1. Conversa y califica | ✅ | Responde, califica (frío/tibio/caliente), guarda datos, pasa a asesor, «Mensaje al autorizar» en campañas, filtro «Autorizaron» en la bandeja |
-| 2. Agenda | pendiente | Google Calendar: disponibilidad, agendar, cancelar, reprogramar |
+| 2. Agenda | ✅ | Google Calendar: horarios libres, agendar, reprogramar y cancelar citas; disparador de etapa «Se agendó una reunión» |
 | 3. Recordatorios | pendiente | Recordatorio de cita al cliente con plantilla aprobada por Meta |
 
 ## Cómo funciona
@@ -18,7 +18,9 @@ conversación a un asesor cuando hace falta. Pantalla: **Ajustes → Asistente I
 | Mensaje entrante → espera 8 s (ráfagas) → automatizaciones | `WhatsappMessage#schedule_inbound_automation` → `WhatsappInboundAutomationJob` |
 | «Sí» a una campaña con «Mensaje al autorizar» | `WhatsApp::ConfirmationFollowup` (texto fijo, una vez por destinatario) |
 | Respuesta del asistente | `AiAgent::Responder` (instrucciones + info del negocio + últimos 20 mensajes de 7 días) |
-| Herramientas del CRM | `AiAgent::Tools`: `calificar_lead`, `guardar_datos_contacto`, `pasar_a_asesor` |
+| Herramientas del CRM | `AiAgent::Tools`: `calificar_lead`, `guardar_datos_contacto`, `pasar_a_asesor` y, con agenda, `consultar_disponibilidad`, `agendar_cita`, `reprogramar_cita`, `cancelar_cita` |
+| Agenda | `AiAgent::Scheduler` (horario de atención, duración, anticipación, ocupado en Google + citas del CRM) y `AiAgent::GoogleCalendar` (cuenta de servicio) |
+| Citas | `appointments` (Ajustes → Asistente IA → Próximas citas) |
 | Modelo | `AiAgent::OpenaiClient` (Chat Completions con herramientas) |
 | Registro y costo | `ai_agent_runs` (tokens de entrada/salida, herramientas usadas, errores) |
 
@@ -45,6 +47,28 @@ dokku config:set crm-iswo-api OPENAI_BASE_URL=https://...     # proxy / endpoint
 ```
 
 Sin `OPENAI_API_KEY` se puede dejar todo configurado; el asistente empieza a responder cuando se agrega.
+
+## Agenda: Google Calendar con cuenta de servicio (una vez)
+
+1. En [Google Cloud Console](https://console.cloud.google.com/), crea o elige un proyecto y habilita **Google Calendar API**.
+2. Ve a **IAM y administración → Cuentas de servicio → Crear cuenta de servicio**. No necesita roles.
+3. En la cuenta, abre **Claves → Agregar clave → JSON** y se descarga el archivo.
+4. Configúralo en el servidor; se puede pasar en base64 para evitar problemas con comillas:
+
+   ```sh
+   dokku config:set crm-iswo-api GOOGLE_SERVICE_ACCOUNT_JSON="$(base64 -w0 cuenta-servicio.json)"
+   ```
+
+5. En **Ajustes → Asistente IA → Agenda**, el CRM muestra el correo de la cuenta de servicio. En Google Calendar, cada empresa:
+   - abre **Configuración del calendario → Compartir con personas específicas**;
+   - agrega ese correo con permiso **«Hacer cambios en los eventos»**.
+6. En la misma pantalla:
+   - escribe el **ID del calendario**: el correo del calendario, o el ID que aparece en «Integrar el calendario»;
+   - fija el horario de atención, la duración, la anticipación y el lugar o enlace;
+   - pulsa **Probar conexión**.
+7. Opcional: en **Ajustes → Pipelines**, en la etapa que corresponda (p. ej. «Reunión agendada»), elige el avance automático **«Se agendó una reunión (asistente IA)»**.
+
+Los eventos se crean sin enviar invitaciones (`sendUpdates=none`). Al cliente se le confirma por WhatsApp.
 
 ## Costo
 

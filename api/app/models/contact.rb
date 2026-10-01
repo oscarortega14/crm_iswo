@@ -63,6 +63,7 @@ class Contact < ApplicationRecord
   has_many :whatsapp_campaign_recipients, dependent: :destroy
   has_many :email_campaign_recipients, dependent: :destroy
   has_many :ai_agent_runs, dependent: :delete_all
+  has_many :appointments, dependent: :destroy
 
   # ---- Validaciones ---------------------------------------------------------
   validates :kind, inclusion: { in: KINDS }

@@ -12,4 +12,7 @@ class AiAgentPolicy < ApplicationPolicy
   def activity? = manager_or_admin?
   def update?   = admin?
   def test?     = admin?
+  # Agenda: ver próximas citas y cancelarlas (admin/manager); probar conexión (admin).
+  def appointments?      = manager_or_admin?
+  def cancel_appointment? = manager_or_admin?
 end

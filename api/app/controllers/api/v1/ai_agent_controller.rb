@@ -10,6 +10,9 @@ module Api
     #   POST  /api/v1/ai_agent/test      probar con una conversación simulada (admin)
     #   GET   /api/v1/ai_agent/activity  últimas respuestas y consumo (admin/manager)
     #   POST  /api/v1/ai_agent/chats     pausar / reanudar el asistente en todos los chats (admin)
+    #   POST  /api/v1/ai_agent/calendar_test            probar la agenda de Google (admin)
+    #   GET   /api/v1/ai_agent/appointments             próximas citas (admin/manager)
+    #   POST  /api/v1/ai_agent/appointments/:id/cancel  cancelar una cita (admin/manager)
     # ========================================================================
     class AiAgentController < BaseController
       def show
@@ -19,7 +22,11 @@ module Api
 
       def update
         authorize :ai_agent, :update?
-        attrs = params.require(:ai_agent).permit(:enabled, *AiAgent::Config::TEXT_FIELDS)
+        attrs = params.require(:ai_agent).permit(
+          :enabled, *AiAgent::Config::TEXT_FIELDS,
+          calendar: [ :calendar_id, :duration_minutes, :start_time, :end_time, :min_notice_hours, :max_days_ahead,
+                      :location, { work_days: [] } ]
+        )
         was_enabled = agent_config.enabled?
         agent_config.update!(attrs)
         # Al encender: no meterse en conversaciones que un asesor ya lleva a mano.
@@ -49,6 +56,40 @@ module Api
                             entity_type: "Tenant", entity_id: current_tenant.id, metadata: { chats: count },
                             ip_address: request.remote_ip, user_agent: request.user_agent)
         render json: { data: agent_config.as_json, meta: { changed: count } }
+      end
+
+      def calendar_test
+        authorize :ai_agent, :test?
+        scheduler = AiAgent::Scheduler.new(current_tenant)
+        slots = scheduler.available_slots(limit: 5)
+        render json: { data: { ok: true, slots: slots.map { |s| { starts_at: s.iso8601, label: scheduler.label(s) } } } }
+      rescue AiAgent::GoogleCalendar::Error => e
+        render json: { error: "calendar_error", message: e.message }, status: :unprocessable_content
+      end
+
+      def appointments
+        authorize :ai_agent, :appointments?
+        scheduler = AiAgent::Scheduler.new(current_tenant)
+        rows = current_tenant.appointments.upcoming.includes(:contact, :owner_user).limit(50)
+        render json: {
+          data: rows.map do |a|
+            { id: a.id.to_s, starts_at: a.starts_at, ends_at: a.ends_at, label: scheduler.label(a.starts_at),
+              contact_id: a.contact_id.to_s, contact_name: a.contact&.display_name, owner_name: a.owner_user&.name,
+              notes: a.notes, source: a.source }
+          end
+        }
+      end
+
+      def cancel_appointment
+        authorize :ai_agent, :cancel_appointment?
+        appointment = current_tenant.appointments.find(params[:id])
+        AiAgent::Scheduler.new(current_tenant).cancel!(appointment)
+        AuditLogger.record!(tenant: current_tenant, user: current_user, action: "appointment.cancel",
+                            entity_type: "Appointment", entity_id: appointment.id,
+                            ip_address: request.remote_ip, user_agent: request.user_agent)
+        head :no_content
+      rescue AiAgent::GoogleCalendar::Error => e
+        render json: { error: "calendar_error", message: e.message }, status: :unprocessable_content
       end
 
       # body: { messages: [{ role: "user"|"assistant", content }] }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_121000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -54,6 +54,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_121000) do
     t.index ["tenant_id", "created_at"], name: "index_ai_agent_runs_on_tenant_id_and_created_at"
     t.index ["tenant_id"], name: "index_ai_agent_runs_on_tenant_id"
     t.index ["trigger_message_id"], name: "index_ai_agent_runs_on_trigger_message_id"
+  end
+
+  create_table "appointments", force: :cascade do |t|
+    t.datetime "canceled_at"
+    t.bigint "contact_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "ends_at", null: false
+    t.string "google_event_id"
+    t.text "notes"
+    t.bigint "opportunity_id"
+    t.bigint "owner_user_id"
+    t.string "source", default: "ai_agent", null: false, comment: "ai_agent | user"
+    t.datetime "starts_at", null: false
+    t.string "status", default: "scheduled", null: false, comment: "scheduled | canceled | completed | no_show"
+    t.bigint "tenant_id", null: false
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.index ["contact_id", "status"], name: "index_appointments_on_contact_id_and_status"
+    t.index ["contact_id"], name: "index_appointments_on_contact_id"
+    t.index ["opportunity_id"], name: "index_appointments_on_opportunity_id"
+    t.index ["owner_user_id"], name: "index_appointments_on_owner_user_id"
+    t.index ["tenant_id", "starts_at"], name: "index_appointments_on_tenant_id_and_starts_at"
+    t.index ["tenant_id"], name: "index_appointments_on_tenant_id"
   end
 
   create_table "audit_events", force: :cascade do |t|
@@ -775,6 +798,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_121000) do
   add_foreign_key "ai_agent_runs", "tenants"
   add_foreign_key "ai_agent_runs", "whatsapp_messages", column: "reply_message_id", on_delete: :nullify
   add_foreign_key "ai_agent_runs", "whatsapp_messages", column: "trigger_message_id", on_delete: :nullify
+  add_foreign_key "appointments", "contacts"
+  add_foreign_key "appointments", "opportunities"
+  add_foreign_key "appointments", "tenants"
+  add_foreign_key "appointments", "users", column: "owner_user_id"
   add_foreign_key "audit_events", "tenants"
   add_foreign_key "audit_events", "users"
   add_foreign_key "bant_criteria", "tenants"

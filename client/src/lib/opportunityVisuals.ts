@@ -6,6 +6,7 @@ export const STAGE_AUTO_TRIGGER_LABELS: Record<StageAutoTrigger, string> = {
   whatsapp_outbound: 'Se envió un WhatsApp al lead',
   whatsapp_inbound: 'El lead escribió por WhatsApp',
   bant_qualified: 'Supera el umbral BANT',
+  appointment_scheduled: 'Se agendó una reunión (asistente IA)',
 }
 
 export function isStageAutoTrigger(value: unknown): value is StageAutoTrigger {

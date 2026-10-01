@@ -131,4 +131,56 @@ RSpec.describe AiAgent::Responder do
     expect(WhatsappMessage.direction_out.count).to eq(0)
     expect(AiAgentRun.count).to eq(0)
   end
+
+  describe "agenda (Google Calendar)" do
+    let(:calendar) { FakeGoogleCalendar.new }
+    let(:zone) { ActiveSupport::TimeZone["America/Bogota"] }
+
+    around { |ex| travel_to(ActiveSupport::TimeZone["America/Bogota"].parse("2026-10-05 07:00")) { ex.run } }
+
+    before do
+      tenant.update!(timezone: "America/Bogota")
+      tenant.ai_agent_config.update!(calendar: { calendar_id: "agenda@iswo.com.co", duration_minutes: 30,
+                                                 start_time: "09:00", end_time: "12:00" })
+      allow(AiAgent::GoogleCalendar).to receive(:configured?).and_return(true)
+      allow(AiAgent::GoogleCalendar).to receive(:new).and_return(calendar)
+    end
+
+    it "consulta horarios, agenda la cita elegida y la confirma" do
+      msg = inbound("El martes a las 9 me sirve")
+      client = FakeOpenaiClient.new(
+        { tool_calls: [ { name: "consultar_disponibilidad", arguments: { desde: "2026-10-06" } } ] },
+        { tool_calls: [ { name: "agendar_cita", arguments: { inicio: "2026-10-06T09:00:00-05:00", motivo: "Diagnóstico" } } ] },
+        { content: "¡Listo! Quedó agendada para el martes 6 de octubre a las 9:00 a. m." }
+      )
+
+      result = described_class.call(message: msg, client: client)
+
+      expect(client.requests.first[:tools].map { |t| t[:function][:name] }).to include("agendar_cita", "cancelar_cita")
+      expect(client.requests.first[:messages].first[:content]).to include("consultar_disponibilidad")
+      availability = result.run.tool_calls.first["result"]
+      expect(availability).to include("martes 6 de octubre, 9:00 a. m. → inicio: 2026-10-06T09:00:00-05:00")
+      expect(contact.appointments.upcoming.first).to have_attributes(starts_at: zone.parse("2026-10-06 09:00"),
+                                                                     opportunity_id: opportunity.id)
+      expect(result.run.tool_calls.last["result"]).to start_with("Cita agendada: martes 6 de octubre")
+    end
+
+    it "si el horario ya no está libre, le pide al modelo ofrecer otros" do
+      calendar.busy_ranges = [ [ zone.parse("2026-10-06 09:00"), zone.parse("2026-10-06 10:00") ] ]
+      client = FakeOpenaiClient.new(
+        { tool_calls: [ { name: "agendar_cita", arguments: { inicio: "2026-10-06T09:00:00-05:00" } } ] },
+        { content: "Ese horario se ocupó, ¿te sirve a las 10:00?" }
+      )
+      result = described_class.call(message: inbound("martes 9 am"), client: client)
+      expect(result.run.tool_calls.first["result"]).to include("ya no está disponible")
+      expect(contact.appointments.count).to eq(0)
+    end
+
+    it "sin agenda configurada no ofrece herramientas de calendario" do
+      allow(AiAgent::GoogleCalendar).to receive(:configured?).and_return(false)
+      client = FakeOpenaiClient.new({ content: "ok" })
+      described_class.call(message: inbound("hola"), client: client)
+      expect(client.requests.first[:tools].map { |t| t[:function][:name] }).not_to include("agendar_cita")
+    end
+  end
 end

@@ -109,4 +109,58 @@ RSpec.describe "Api::V1::AiAgent", type: :request do
       expect(json.dig("meta", "assistant_active")).to be(true)
     end
   end
+
+  describe "agenda" do
+    let(:calendar) { FakeGoogleCalendar.new }
+
+    before do
+      allow(AiAgent::GoogleCalendar).to receive(:configured?).and_return(true)
+      allow(AiAgent::GoogleCalendar).to receive(:service_account_email).and_return("crm@iswo.iam.gserviceaccount.com")
+      allow(AiAgent::GoogleCalendar).to receive(:new).and_return(calendar)
+    end
+
+    it "admin guarda la agenda (validada) y la config expone el correo a compartir" do
+      patch "/api/v1/ai_agent", headers: auth_headers(admin), params: { ai_agent: { calendar: {
+        calendar_id: "agenda@iswo.com.co", duration_minutes: 45, work_days: [ 1, 3, 5 ], start_time: "08:00",
+        end_time: "17:00"
+      } } }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "calendar")).to include("calendar_id" => "agenda@iswo.com.co", "duration_minutes" => 45,
+                                                      "work_days" => [ 1, 3, 5 ])
+      expect(json["data"]).to include("calendar_active" => true,
+                                      "service_account_email" => "crm@iswo.iam.gserviceaccount.com")
+
+      patch "/api/v1/ai_agent", headers: auth_headers(admin),
+            params: { ai_agent: { calendar: { start_time: "18:00", end_time: "08:00" } } }.to_json
+      expect(response).to have_http_status(:unprocessable_content)
+    end
+
+    it "probar conexión devuelve horarios libres; error de Google se muestra claro" do
+      tenant.ai_agent_config.update!(calendar: { calendar_id: "agenda@iswo.com.co" })
+      post "/api/v1/ai_agent/calendar_test", headers: auth_headers(admin)
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "slots")).to be_present
+
+      allow(calendar).to receive(:busy).and_raise(AiAgent::GoogleCalendar::Error, "No se encontró el calendario")
+      post "/api/v1/ai_agent/calendar_test", headers: auth_headers(admin)
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json["message"]).to match(/No se encontró/)
+    end
+
+    it "próximas citas y cancelar (manager); consultor no" do
+      tenant.ai_agent_config.update!(calendar: { calendar_id: "agenda@iswo.com.co" })
+      appointment = create(:appointment, tenant: tenant, google_event_id: "evt_9")
+
+      get "/api/v1/ai_agent/appointments", headers: auth_headers(manager)
+      expect(json["data"].map { |a| a["id"] }).to eq([ appointment.id.to_s ])
+
+      post "/api/v1/ai_agent/appointments/#{appointment.id}/cancel", headers: auth_headers(consultant)
+      expect(response).to have_http_status(:forbidden)
+
+      post "/api/v1/ai_agent/appointments/#{appointment.id}/cancel", headers: auth_headers(manager)
+      expect(response).to have_http_status(:no_content)
+      expect(appointment.reload.status).to eq("canceled")
+      expect(calendar.deleted).to eq([ "evt_9" ])
+    end
+  end
 end

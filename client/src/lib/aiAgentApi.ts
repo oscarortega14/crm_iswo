@@ -7,6 +7,7 @@ import { getAuthQueryScope } from '@/lib/queryClient'
 
 export const aiAgentQueryKeys = {
   config: () => ['aiAgent', getAuthQueryScope(), 'config'] as const,
+  appointments: () => ['aiAgent', getAuthQueryScope(), 'appointments'] as const,
   activity: () => ['aiAgent', getAuthQueryScope(), 'activity'] as const,
 }
 
@@ -27,6 +28,24 @@ export interface AiAgentConfig {
   pausedChats: number
   /** Chats donde un asesor escribió en los últimos 7 días. */
   humanChats: number
+  calendar: AiCalendarSettings
+  /** Hay calendario y cuenta de servicio de Google: el asistente puede agendar. */
+  calendarActive: boolean
+  googleConfigured: boolean
+  /** Correo con el que se comparte el calendario de Google. */
+  serviceAccountEmail: string | null
+}
+
+export interface AiCalendarSettings {
+  calendar_id: string
+  duration_minutes: number
+  /** 0 = domingo … 6 = sábado */
+  work_days: number[]
+  start_time: string
+  end_time: string
+  min_notice_hours: number
+  max_days_ahead: number
+  location: string
 }
 
 function mapConfig(d: Record<string, unknown>): AiAgentConfig {
@@ -44,6 +63,10 @@ function mapConfig(d: Record<string, unknown>): AiAgentConfig {
     defaults: (d.defaults ?? { tone: '', qualification: '', handoff_rules: '' }) as AiAgentConfig['defaults'],
     pausedChats: Number(d.paused_chats ?? 0),
     humanChats: Number(d.human_chats ?? 0),
+    calendar: d.calendar as AiCalendarSettings,
+    calendarActive: d.calendar_active === true,
+    googleConfigured: d.google_configured === true,
+    serviceAccountEmail: d.service_account_email != null ? String(d.service_account_email) : null,
   }
 }
 
@@ -63,7 +86,7 @@ export type AiAgentInput = {
 }
 
 export async function updateAiAgentConfig(
-  body: Partial<AiAgentInput>,
+  body: Partial<AiAgentInput> & { calendar?: AiCalendarSettings },
   options: { pauseHumanChats?: boolean } = {},
 ): Promise<{ config: AiAgentConfig; pausedNow: number }> {
   const res = await api.patch('/ai_agent', { ai_agent: body, pause_human_chats: options.pauseHumanChats })
@@ -144,4 +167,43 @@ export const TOOL_LABELS: Record<string, string> = {
   calificar_lead: 'Calificó el lead',
   guardar_datos_contacto: 'Guardó datos del contacto',
   pasar_a_asesor: 'Pasó a un asesor',
+  consultar_disponibilidad: 'Consultó la agenda',
+  agendar_cita: 'Agendó una cita',
+  reprogramar_cita: 'Reprogramó la cita',
+  cancelar_cita: 'Canceló la cita',
+}
+
+export async function testCalendar(): Promise<{ label: string; startsAt: string }[]> {
+  const res = await api.post('/ai_agent/calendar_test')
+  return ((res.data.data?.slots ?? []) as { label: string; starts_at: string }[]).map((s) => ({
+    label: s.label,
+    startsAt: s.starts_at,
+  }))
+}
+
+export interface AppointmentRow {
+  id: string
+  label: string
+  startsAt: string
+  contactId: string
+  contactName: string | null
+  ownerName: string | null
+  notes: string | null
+}
+
+export async function fetchAppointments(): Promise<AppointmentRow[]> {
+  const res = await api.get('/ai_agent/appointments')
+  return ((res.data.data ?? []) as Record<string, unknown>[]).map((a) => ({
+    id: String(a.id),
+    label: String(a.label ?? ''),
+    startsAt: String(a.starts_at ?? ''),
+    contactId: String(a.contact_id ?? ''),
+    contactName: a.contact_name != null ? String(a.contact_name) : null,
+    ownerName: a.owner_name != null ? String(a.owner_name) : null,
+    notes: a.notes != null ? String(a.notes) : null,
+  }))
+}
+
+export async function cancelAppointment(id: string): Promise<void> {
+  await api.post(`/ai_agent/appointments/${id}/cancel`)
 }
