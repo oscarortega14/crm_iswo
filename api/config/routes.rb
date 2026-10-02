@@ -214,6 +214,7 @@ Rails.application.routes.draw do
         post :calendar_test
         get  :appointments
         post "appointments/:id/cancel", action: :cancel_appointment, as: :cancel_appointment
+        post "appointments/:id/outcome", action: :appointment_outcome, as: :appointment_outcome
       end
 
       # ---- Email marketing (AWS SES, dominio propio del tenant) ---------------

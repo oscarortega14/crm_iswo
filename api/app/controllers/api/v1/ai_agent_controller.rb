@@ -13,6 +13,7 @@ module Api
     #   POST  /api/v1/ai_agent/calendar_test            probar la agenda de Google (admin)
     #   GET   /api/v1/ai_agent/appointments             próximas citas (admin/manager)
     #   POST  /api/v1/ai_agent/appointments/:id/cancel  cancelar una cita (admin/manager)
+    #   POST  /api/v1/ai_agent/appointments/:id/outcome { outcome: attended|no_show } (admin/manager)
     # ========================================================================
     class AiAgentController < BaseController
       def show
@@ -25,7 +26,9 @@ module Api
         attrs = params.require(:ai_agent).permit(
           :enabled, *AiAgent::Config::TEXT_FIELDS,
           calendar: [ :calendar_id, :duration_minutes, :start_time, :end_time, :min_notice_hours, :max_days_ahead,
-                      :location, { work_days: [] } ]
+                      :location, { work_days: [] } ],
+          reminders: [ :whatsapp_template_id, :no_show_template_id, :email_enabled, :staff_offset_minutes,
+                       :daily_summary, :no_show_followup, { client_offsets: [] } ]
         )
         was_enabled = agent_config.enabled?
         agent_config.update!(attrs)
@@ -70,13 +73,12 @@ module Api
       def appointments
         authorize :ai_agent, :appointments?
         scheduler = AiAgent::Scheduler.new(current_tenant)
-        rows = current_tenant.appointments.upcoming.includes(:contact, :owner_user).limit(50)
+        upcoming = current_tenant.appointments.upcoming.includes(:contact, :owner_user).limit(50)
+        pending  = current_tenant.appointments.awaiting_outcome.where(starts_at: 14.days.ago..)
+                                 .includes(:contact, :owner_user).limit(50)
         render json: {
-          data: rows.map do |a|
-            { id: a.id.to_s, starts_at: a.starts_at, ends_at: a.ends_at, label: scheduler.label(a.starts_at),
-              contact_id: a.contact_id.to_s, contact_name: a.contact&.display_name, owner_name: a.owner_user&.name,
-              notes: a.notes, source: a.source }
-          end
+          data: upcoming.map { |a| appointment_json(a, scheduler) },
+          meta: { awaiting_outcome: pending.map { |a| appointment_json(a, scheduler) } }
         }
       end
 
@@ -90,6 +92,23 @@ module Api
         head :no_content
       rescue AiAgent::GoogleCalendar::Error => e
         render json: { error: "calendar_error", message: e.message }, status: :unprocessable_content
+      end
+
+      # Después de la cita: asistió (completed) o no asistió (no_show → mensaje para reagendar).
+      def appointment_outcome
+        authorize :ai_agent, :cancel_appointment?
+        appointment = current_tenant.appointments.status_scheduled.find(params[:id])
+        outcome = params.require(:outcome).to_s
+        unless %w[attended no_show].include?(outcome)
+          return render json: { error: "invalid", message: "Resultado inválido." }, status: :unprocessable_content
+        end
+
+        appointment.update!(status: outcome == "attended" ? "completed" : "no_show", outcome_at: Time.current)
+        AiAgent::AppointmentReminders.new(current_tenant).send_no_show_followup!(appointment) if outcome == "no_show"
+        AuditLogger.record!(tenant: current_tenant, user: current_user, action: "appointment.#{outcome}",
+                            entity_type: "Appointment", entity_id: appointment.id,
+                            ip_address: request.remote_ip, user_agent: request.user_agent)
+        render json: { data: { status: appointment.status, no_show_followup_at: appointment.reload.no_show_followup_at } }
       end
 
       # body: { messages: [{ role: "user"|"assistant", content }] }
@@ -134,6 +153,16 @@ module Api
 
       def agent_config
         @agent_config ||= current_tenant.ai_agent_config
+      end
+
+      def appointment_json(appointment, scheduler)
+        {
+          id: appointment.id.to_s, starts_at: appointment.starts_at, ends_at: appointment.ends_at,
+          label: scheduler.label(appointment.starts_at), contact_id: appointment.contact_id.to_s,
+          contact_name: appointment.contact&.display_name, owner_name: appointment.owner_user&.name,
+          notes: appointment.notes, source: appointment.source, confirmed_at: appointment.confirmed_at,
+          reminders_sent: appointment.client_reminders.reject { |_, v| v["skipped"] }.keys.map(&:to_i).sort.reverse
+        }
       end
 
       def run_json(run)

@@ -27,7 +27,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { formatRailsError } from '@/lib/api'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { useUserRole } from '@/stores/auth'
-import { AgendaSettings, UpcomingAppointments } from '@/components/ai-agent/AgendaSettings'
+import { AgendaSettings, RemindersSettings, UpcomingAppointments } from '@/components/ai-agent/AgendaSettings'
 import {
   TOOL_LABELS,
   aiAgentQueryKeys,
@@ -85,6 +85,7 @@ function AiAgentSettingsPage() {
           <div className="min-w-0 space-y-6">
             <ConfigForm config={config} canEdit={canEdit} />
             <AgendaSettings config={config} canEdit={canEdit} />
+            <RemindersSettings config={config} canEdit={canEdit} />
           </div>
           <div className="space-y-6">
             <UpcomingAppointments canCancel />

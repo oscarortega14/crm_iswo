@@ -1,0 +1,4 @@
+Citas de hoy en <%= @tenant.name %>:
+<% @rows.each do |row| %>
+- <%= row[:time] %> · <%= row[:contact] %><%= " · #{row[:owner]}" if row[:owner] %> · <%= row[:confirmed] ? "Confirmó" : "Sin confirmar" %>
+<% end %>

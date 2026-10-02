@@ -29,11 +29,24 @@ export interface AiAgentConfig {
   /** Chats donde un asesor escribió en los últimos 7 días. */
   humanChats: number
   calendar: AiCalendarSettings
+  reminders: AiReminderSettings
   /** Hay calendario y cuenta de servicio de Google: el asistente puede agendar. */
   calendarActive: boolean
   googleConfigured: boolean
   /** Correo con el que se comparte el calendario de Google. */
   serviceAccountEmail: string | null
+}
+
+export interface AiReminderSettings {
+  /** Horas antes de la cita en que se recuerda al cliente (24, 1…). */
+  client_offsets: number[]
+  whatsapp_template_id: string | null
+  no_show_template_id: string | null
+  email_enabled: boolean
+  /** Minutos antes para el recordatorio al asesor (0 = desactivado). */
+  staff_offset_minutes: number
+  daily_summary: boolean
+  no_show_followup: boolean
 }
 
 export interface AiCalendarSettings {
@@ -64,6 +77,7 @@ function mapConfig(d: Record<string, unknown>): AiAgentConfig {
     pausedChats: Number(d.paused_chats ?? 0),
     humanChats: Number(d.human_chats ?? 0),
     calendar: d.calendar as AiCalendarSettings,
+    reminders: d.reminders as AiReminderSettings,
     calendarActive: d.calendar_active === true,
     googleConfigured: d.google_configured === true,
     serviceAccountEmail: d.service_account_email != null ? String(d.service_account_email) : null,
@@ -86,7 +100,7 @@ export type AiAgentInput = {
 }
 
 export async function updateAiAgentConfig(
-  body: Partial<AiAgentInput> & { calendar?: AiCalendarSettings },
+  body: Partial<AiAgentInput> & { calendar?: AiCalendarSettings; reminders?: AiReminderSettings },
   options: { pauseHumanChats?: boolean } = {},
 ): Promise<{ config: AiAgentConfig; pausedNow: number }> {
   const res = await api.patch('/ai_agent', { ai_agent: body, pause_human_chats: options.pauseHumanChats })
@@ -189,11 +203,13 @@ export interface AppointmentRow {
   contactName: string | null
   ownerName: string | null
   notes: string | null
+  confirmedAt: string | null
+  /** Recordatorios enviados al cliente (horas antes). */
+  remindersSent: number[]
 }
 
-export async function fetchAppointments(): Promise<AppointmentRow[]> {
-  const res = await api.get('/ai_agent/appointments')
-  return ((res.data.data ?? []) as Record<string, unknown>[]).map((a) => ({
+function mapAppointment(a: Record<string, unknown>): AppointmentRow {
+  return {
     id: String(a.id),
     label: String(a.label ?? ''),
     startsAt: String(a.starts_at ?? ''),
@@ -201,7 +217,22 @@ export async function fetchAppointments(): Promise<AppointmentRow[]> {
     contactName: a.contact_name != null ? String(a.contact_name) : null,
     ownerName: a.owner_name != null ? String(a.owner_name) : null,
     notes: a.notes != null ? String(a.notes) : null,
-  }))
+    confirmedAt: a.confirmed_at != null ? String(a.confirmed_at) : null,
+    remindersSent: Array.isArray(a.reminders_sent) ? (a.reminders_sent as number[]) : [],
+  }
+}
+
+/** Próximas citas y las que ya pasaron sin marcar si el cliente asistió. */
+export async function fetchAppointments(): Promise<{ upcoming: AppointmentRow[]; awaitingOutcome: AppointmentRow[] }> {
+  const res = await api.get('/ai_agent/appointments')
+  return {
+    upcoming: ((res.data.data ?? []) as Record<string, unknown>[]).map(mapAppointment),
+    awaitingOutcome: ((res.data.meta?.awaiting_outcome ?? []) as Record<string, unknown>[]).map(mapAppointment),
+  }
+}
+
+export async function setAppointmentOutcome(id: string, outcome: 'attended' | 'no_show'): Promise<void> {
+  await api.post(`/ai_agent/appointments/${id}/outcome`, { outcome })
 }
 
 export async function cancelAppointment(id: string): Promise<void> {

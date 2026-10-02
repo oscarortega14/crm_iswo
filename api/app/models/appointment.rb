@@ -16,6 +16,7 @@ class Appointment < ApplicationRecord
   belongs_to :contact
   belongs_to :opportunity, optional: true
   belongs_to :owner_user, class_name: "User", optional: true
+  belongs_to :staff_reminder, class_name: "Reminder", optional: true
 
   enum :status, STATUSES.zip(STATUSES).to_h, prefix: :status, default: "scheduled"
 
@@ -24,6 +25,8 @@ class Appointment < ApplicationRecord
   validate :ends_after_start
 
   scope :upcoming, -> { status_scheduled.where(starts_at: Time.current..).order(:starts_at) }
+  # Ya pasaron y nadie marcó si el cliente asistió.
+  scope :awaiting_outcome, -> { status_scheduled.where(ends_at: ...Time.current).order(:starts_at) }
   scope :overlapping, ->(from, to) { status_scheduled.where("starts_at < ? AND ends_at > ?", to, from) }
 
   private

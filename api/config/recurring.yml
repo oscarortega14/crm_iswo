@@ -47,6 +47,16 @@ shared: &shared
     queue: integrations
     schedule: every minute
 
+  appointment_reminder_job:
+    class: AppointmentReminderJob
+    queue: integrations
+    schedule: every 5 minutes
+
+  appointment_daily_summary_job:
+    class: AppointmentDailySummaryJob
+    queue: low
+    schedule: every hour
+
 development:
   <<: *shared
 

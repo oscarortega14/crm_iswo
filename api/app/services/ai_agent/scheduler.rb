@@ -76,7 +76,8 @@ module AiAgent
       ends_at = starts_at + duration
       client.move_event(appointment.google_event_id, starts_at: starts_at, ends_at: ends_at,
                                                      time_zone: @zone.tzinfo.name) if appointment.google_event_id
-      appointment.update!(starts_at: starts_at, ends_at: ends_at)
+      appointment.update!(starts_at: starts_at, ends_at: ends_at, confirmed_at: nil, client_reminders: {})
+      sync_staff_reminder!(appointment)
       notify(appointment, "Cita reprogramada: #{appointment.contact.display_name}")
       appointment
     end
@@ -84,9 +85,13 @@ module AiAgent
     def cancel!(appointment)
       client.delete_event(appointment.google_event_id) if appointment.google_event_id
       appointment.update!(status: "canceled", canceled_at: Time.current)
+      appointment.staff_reminder&.update!(status: "done") if appointment.staff_reminder&.status_pending?
       notify(appointment, "Cita cancelada: #{appointment.contact.display_name}")
       appointment
     end
+
+    # Frase que termina en la hora: no agrega otro punto si ya termina en «a. m.».
+    def self.sentence(text) = text.end_with?(".") ? text : "#{text}."
 
     # «jueves 2 de octubre, 10:00 a. m.»
     def label(time)
@@ -155,10 +160,44 @@ module AiAgent
       ].compact.join("\n")
     end
 
+    # Recordatorio al asesor (módulo Recordatorios) N minutos antes de la cita.
+    def sync_staff_reminder!(appointment)
+      minutes = @tenant.ai_agent_config.reminders["staff_offset_minutes"].to_i
+      owner = appointment.owner_user
+      return if minutes <= 0 || owner.nil? || appointment.opportunity.nil?
+      return unless Reminders::StaffRecipient.eligible?(owner)
+
+      remind_at = [ appointment.starts_at - minutes.minutes, Time.current + 1.minute ].max
+      reminder = appointment.staff_reminder
+      if reminder&.status_pending?
+        reminder.update!(remind_at: remind_at, subject: staff_subject(appointment))
+      else
+        reminder = @tenant.reminders.create!(
+          opportunity: appointment.opportunity, user: owner, remind_at: remind_at,
+          channel: Reminders::StaffRecipient.phone_e164(owner) ? "whatsapp" : "in_app",
+          subject: staff_subject(appointment), message: staff_message(appointment)
+        )
+        appointment.update_columns(staff_reminder_id: reminder.id)
+      end
+    end
+
+    def staff_subject(appointment)
+      "Reunión con #{appointment.contact.display_name} — #{label(appointment.starts_at)}"
+    end
+
+    def staff_message(appointment)
+      contact = appointment.contact
+      [ "Cita agendada por el asistente IA.", ("Motivo: #{appointment.notes}" if appointment.notes.present?),
+        ("Empresa: #{contact.company_name}" if contact.company_name.present?),
+        ("Celular: #{contact.phone_e164_safe}" if contact.phone_e164_safe.present?),
+        ("Correo: #{contact.email}" if contact.email.present?) ].compact.join("\n")
+    end
+
     def after_booking(appointment)
       if appointment.opportunity
         Opportunities::StageAutomation.call(opportunity: appointment.opportunity, trigger: "appointment_scheduled")
       end
+      sync_staff_reminder!(appointment)
       notify(appointment, "Nueva cita: #{appointment.contact.display_name}")
     end
 

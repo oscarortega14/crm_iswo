@@ -75,4 +75,23 @@ RSpec.describe AiAgent::Scheduler do
     expect(appointment.reload).to have_attributes(status: "canceled")
     expect(calendar.deleted).to eq([ "evt_1" ])
   end
+
+  it "recordatorio al asesor: se crea al agendar, se mueve al reprogramar y se cierra al cancelar" do
+    tenant.ai_agent_config.update!(reminders: { staff_offset_minutes: 60 })
+    pipeline = create(:pipeline_with_stages, tenant: tenant)
+    opp = create(:opportunity, :skip_bant_recalc, tenant: tenant, contact: contact, owner_user: owner,
+                                                  pipeline: pipeline, pipeline_stage: pipeline.pipeline_stages.first)
+
+    appointment = scheduler.book!(contact: contact, opportunity: opp, starts_at: "2026-10-06T10:00:00-05:00")
+    reminder = appointment.reload.staff_reminder
+    expect(reminder).to have_attributes(user_id: owner.id, channel: "in_app", status: "pending",
+                                        remind_at: zone.parse("2026-10-06 09:00"))
+    expect(reminder.subject).to include("María Andrade", "martes 6 de octubre")
+
+    scheduler.reschedule!(appointment, "2026-10-07T10:00:00-05:00")
+    expect(reminder.reload.remind_at).to eq(zone.parse("2026-10-07 09:00"))
+
+    scheduler.cancel!(appointment.reload)
+    expect(reminder.reload.status).to eq("done")
+  end
 end

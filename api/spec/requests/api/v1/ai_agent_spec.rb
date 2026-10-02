@@ -163,4 +163,41 @@ RSpec.describe "Api::V1::AiAgent", type: :request do
       expect(calendar.deleted).to eq([ "evt_9" ])
     end
   end
+
+  describe "recordatorios y resultado de la cita" do
+    let!(:template) { create(:whatsapp_template, tenant: tenant, variable_labels: %w[Nombre Fecha]) }
+
+    it "guarda la configuración de recordatorios validada" do
+      patch "/api/v1/ai_agent", headers: auth_headers(admin), params: { ai_agent: { reminders: {
+        client_offsets: [ 1, 24, 7 ], whatsapp_template_id: template.id, email_enabled: false, staff_offset_minutes: 30
+      } } }.to_json
+      expect(json.dig("data", "reminders")).to include("client_offsets" => [ 24, 1 ], "email_enabled" => false,
+                                                       "whatsapp_template_id" => template.id.to_s,
+                                                       "staff_offset_minutes" => 30, "daily_summary" => true)
+
+      patch "/api/v1/ai_agent", headers: auth_headers(admin),
+            params: { ai_agent: { reminders: { whatsapp_template_id: 999_999 } } }.to_json
+      expect(response).to have_http_status(:unprocessable_content)
+    end
+
+    it "lista las citas pendientes de marcar y registra asistió / no asistió" do
+      contact = create(:contact, tenant: tenant, email: "c@example.com", phone_e164: nil)
+      past = create(:appointment, tenant: tenant, contact: contact, starts_at: 3.hours.ago, ends_at: 2.hours.ago)
+      other = create(:appointment, tenant: tenant, contact: contact, starts_at: 5.hours.ago, ends_at: 4.hours.ago)
+
+      get "/api/v1/ai_agent/appointments", headers: auth_headers(manager)
+      expect(json.dig("meta", "awaiting_outcome").map { |a| a["id"] }).to contain_exactly(past.id.to_s, other.id.to_s)
+
+      post "/api/v1/ai_agent/appointments/#{past.id}/outcome", headers: auth_headers(manager),
+           params: { outcome: "attended" }.to_json
+      expect(past.reload.status).to eq("completed")
+
+      expect {
+        post "/api/v1/ai_agent/appointments/#{other.id}/outcome", headers: auth_headers(manager),
+             params: { outcome: "no_show" }.to_json
+      }.to have_enqueued_mail(AppointmentMailer, :no_show)
+      expect(other.reload).to have_attributes(status: "no_show")
+      expect(json.dig("data", "no_show_followup_at")).to be_present
+    end
+  end
 end

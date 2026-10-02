@@ -83,7 +83,8 @@ class WhatsappMessage < ApplicationRecord
   # para contestar una sola vez a una ráfaga de mensajes).
   def schedule_inbound_automation
     return unless contact
-    return unless WhatsApp::ConsentReply.classify(body) == :opt_in || tenant.ai_agent_config.enabled?
+    return unless WhatsApp::ConsentReply.classify(body) == :opt_in || tenant.ai_agent_config.enabled? ||
+                  AiAgent::AppointmentReplies.pending_for(contact)
 
     WhatsappInboundAutomationJob.set(wait: WhatsappInboundAutomationJob::DEBOUNCE).perform_later(id)
   end

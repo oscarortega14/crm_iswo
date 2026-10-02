@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_02_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -58,14 +58,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
 
   create_table "appointments", force: :cascade do |t|
     t.datetime "canceled_at"
+    t.jsonb "client_reminders", default: {}, null: false, comment: "{ \"24\" => { at, whatsapp_message_id, email, skipped } } por horas de anticipación"
+    t.datetime "confirmed_at", comment: "el cliente confirmó asistencia"
     t.bigint "contact_id", null: false
     t.datetime "created_at", null: false
     t.datetime "ends_at", null: false
     t.string "google_event_id"
+    t.datetime "no_show_followup_at", comment: "mensaje para reagendar enviado"
     t.text "notes"
     t.bigint "opportunity_id"
+    t.datetime "outcome_at", comment: "cuándo se marcó asistió / no asistió"
     t.bigint "owner_user_id"
     t.string "source", default: "ai_agent", null: false, comment: "ai_agent | user"
+    t.bigint "staff_reminder_id"
     t.datetime "starts_at", null: false
     t.string "status", default: "scheduled", null: false, comment: "scheduled | canceled | completed | no_show"
     t.bigint "tenant_id", null: false
@@ -75,6 +80,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
     t.index ["contact_id"], name: "index_appointments_on_contact_id"
     t.index ["opportunity_id"], name: "index_appointments_on_opportunity_id"
     t.index ["owner_user_id"], name: "index_appointments_on_owner_user_id"
+    t.index ["staff_reminder_id"], name: "index_appointments_on_staff_reminder_id"
     t.index ["tenant_id", "starts_at"], name: "index_appointments_on_tenant_id_and_starts_at"
     t.index ["tenant_id"], name: "index_appointments_on_tenant_id"
   end
@@ -800,6 +806,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
   add_foreign_key "ai_agent_runs", "whatsapp_messages", column: "trigger_message_id", on_delete: :nullify
   add_foreign_key "appointments", "contacts"
   add_foreign_key "appointments", "opportunities"
+  add_foreign_key "appointments", "reminders", column: "staff_reminder_id", on_delete: :nullify
   add_foreign_key "appointments", "tenants"
   add_foreign_key "appointments", "users", column: "owner_user_id"
   add_foreign_key "audit_events", "tenants"

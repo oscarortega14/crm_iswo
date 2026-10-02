@@ -17,6 +17,10 @@ module AiAgent
   # Agenda (fase 2, AiAgent::Scheduler) en settings["ai_agent"]["calendar"]:
   #   calendar_id, duration_minutes, work_days (0=domingo…6), start_time,
   #   end_time, min_notice_hours, max_days_ahead, location
+  #
+  # Recordatorios (fase 3, AiAgent::AppointmentReminders) en ["reminders"]:
+  #   client_offsets (horas antes), whatsapp_template_id, no_show_template_id,
+  #   email_enabled, staff_offset_minutes, daily_summary, no_show_followup
   # ==========================================================================
   class Config
     TEXT_FIELDS = %w[assistant_name business_info faq tone qualification handoff_rules].freeze
@@ -37,6 +41,11 @@ module AiAgent
       "start_time" => "08:00", "end_time" => "18:00", "min_notice_hours" => 2, "max_days_ahead" => 14,
       "location" => ""
     }.freeze
+    REMINDER_DEFAULTS = {
+      "client_offsets" => [ 24, 1 ], "whatsapp_template_id" => nil, "no_show_template_id" => nil,
+      "email_enabled" => true, "staff_offset_minutes" => 60, "daily_summary" => true, "no_show_followup" => true
+    }.freeze
+    CLIENT_OFFSET_OPTIONS = [ 48, 24, 4, 2, 1 ].freeze
     TIME_FORMAT = /\A([01]\d|2[0-3]):[0-5]\d\z/
 
     attr_reader :tenant
@@ -63,6 +72,16 @@ module AiAgent
       CALENDAR_DEFAULTS.merge((raw["calendar"] || {}).compact)
     end
 
+    def reminders
+      REMINDER_DEFAULTS.merge(raw["reminders"] || {})
+    end
+
+    # Plantilla aprobada (o sin sincronizar) del catálogo, o nil.
+    def reminder_template(key = "whatsapp_template_id")
+      id = reminders[key]
+      id.present? ? tenant.whatsapp_templates.active.find_by(id: id) : nil
+    end
+
     # La agenda funciona: hay calendario y cuenta de servicio de Google.
     def calendar_active? = calendar["calendar_id"].present? && GoogleCalendar.configured?
 
@@ -70,6 +89,7 @@ module AiAgent
       attrs = attrs.to_h.stringify_keys
       next_config = raw.dup
       next_config["calendar"] = normalize_calendar(attrs["calendar"]) if attrs.key?("calendar")
+      next_config["reminders"] = normalize_reminders(attrs["reminders"]) if attrs.key?("reminders")
       next_config["enabled"] = ActiveModel::Type::Boolean.new.cast(attrs["enabled"]) == true if attrs.key?("enabled")
       TEXT_FIELDS.each do |field|
         next unless attrs.key?(field)
@@ -128,6 +148,23 @@ module AiAgent
       cal
     end
 
+    def normalize_reminders(input)
+      input = (input || {}).to_h.stringify_keys.slice(*REMINDER_DEFAULTS.keys)
+      rem = reminders.merge(input)
+      bool = ActiveModel::Type::Boolean.new
+      rem["client_offsets"] = Array(rem["client_offsets"]).map(&:to_i).select { |h| CLIENT_OFFSET_OPTIONS.include?(h) }
+                                                                     .uniq.sort.reverse
+      %w[email_enabled daily_summary no_show_followup].each { |k| rem[k] = bool.cast(rem[k]) == true }
+      rem["staff_offset_minutes"] = rem["staff_offset_minutes"].to_i.clamp(0, 1440)
+      %w[whatsapp_template_id no_show_template_id].each do |k|
+        rem[k] = rem[k].presence&.to_s
+        next if rem[k].nil? || tenant.whatsapp_templates.active.exists?(id: rem[k])
+
+        raise ArgumentError, "La plantilla elegida no existe o está desactivada."
+      end
+      rem
+    end
+
     def as_json(*)
       {
         "enabled" => enabled?, "active" => active?, "assistant_name" => assistant_name,
@@ -135,7 +172,7 @@ module AiAgent
         "handoff_rules" => handoff_rules, "openai_configured" => OpenaiClient.configured?,
         "model" => OpenaiClient.model_name, "defaults" => DEFAULTS,
         "paused_chats" => paused_chats.count, "human_chats" => human_chats.count,
-        "calendar" => calendar, "calendar_active" => calendar_active?,
+        "calendar" => calendar, "calendar_active" => calendar_active?, "reminders" => reminders,
         "google_configured" => GoogleCalendar.configured?,
         "service_account_email" => GoogleCalendar.service_account_email
       }

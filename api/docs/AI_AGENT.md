@@ -9,7 +9,7 @@ conversación a un asesor cuando hace falta. Pantalla: **Ajustes → Asistente I
 |---|---|---|
 | 1. Conversa y califica | ✅ | Responde, califica (frío/tibio/caliente), guarda datos, pasa a asesor, «Mensaje al autorizar» en campañas, filtro «Autorizaron» en la bandeja |
 | 2. Agenda | ✅ | Google Calendar: horarios libres, agendar, reprogramar y cancelar citas; disparador de etapa «Se agendó una reunión» |
-| 3. Recordatorios | pendiente | Recordatorio de cita al cliente con plantilla aprobada por Meta |
+| 3. Recordatorios | ✅ | Recordatorios al cliente (WhatsApp y correo), «Confirmo / Reprogramar», recordatorio al asesor, resumen diario y «no asistió» → ofrecer reagendar |
 
 ## Cómo funciona
 
@@ -74,3 +74,23 @@ Los eventos se crean sin enviar invitaciones (`sendUpdates=none`). Al cliente se
 
 Cada respuesta consume ~1.500 tokens de entrada y ~60 de salida (varía con la información del negocio y el
 historial). La pantalla muestra el consumo y un costo aproximado de los últimos 30 días.
+
+## Recordatorios de citas (fase 3)
+
+| Pieza | Dónde |
+|---|---|
+| Recordatorios al cliente (cada 5 min) | `AppointmentReminderJob` → `AiAgent::AppointmentReminders` |
+| «Confirmo» / «Reprogramar» | `AiAgent::AppointmentReplies` (dentro de `WhatsappInboundAutomationJob`) |
+| Recordatorio al asesor | módulo Recordatorios (`Reminder`), lo crea `AiAgent::Scheduler` al agendar |
+| Resumen diario (7:00 a. m.) | `AppointmentDailySummaryJob` → campana + correo a admin/manager |
+| Correos al cliente | `AppointmentMailer` (desde el dominio verificado del email marketing si existe) |
+
+Reglas:
+
+- **Por WhatsApp:**
+  - si el cliente escribió en las últimas 24 h, el recordatorio va como texto libre, sin costo de plantilla;
+  - si no, se usa la plantilla elegida en Ajustes → Asistente IA (categoría **Utilidad**; variables `{{1}}` nombre y `{{2}}` fecha y hora);
+  - sin plantilla y con la ventana cerrada, no se envía WhatsApp; el correo sí, si está activado.
+- Un recordatorio se **omite** si la cita se agendó con menos anticipación que ese recordatorio.
+- **«Confirmo»** marca la cita como confirmada y avisa al asesor. **«Reprogramar»** lo atiende el asistente (si está activo) o se avisa al asesor.
+- **«No asistió»**, al marcarlo en Citas, envía el mensaje para reagendar por WhatsApp (texto libre o la plantilla de «no asistió») y por correo.
