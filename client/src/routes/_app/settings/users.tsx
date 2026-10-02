@@ -259,10 +259,10 @@ function UsersSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div>
           <h2 className="text-lg font-medium">{pageTitle}</h2>
-          <p className="text-sm text-muted-foreground">{pageDescription}</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">{pageDescription}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isRefetching}>
@@ -344,9 +344,9 @@ function UsersSettingsPage() {
                 <TableRow>
                   <TableHead>Usuario</TableHead>
                   <TableHead>Rol</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Registro</TableHead>
-                  <TableHead>Último acceso</TableHead>
+                  <TableHead className="hidden md:table-cell">Estado</TableHead>
+                  <TableHead className="hidden md:table-cell">Registro</TableHead>
+                  <TableHead className="hidden md:table-cell">Último acceso</TableHead>
                   <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -362,19 +362,24 @@ function UsersSettingsPage() {
                     const isSelf = currentUser?.id === user.id
                     return (
                       <TableRow key={user.id}>
-                        <TableCell>
-                          <div>
+                        <TableCell className="whitespace-normal md:whitespace-nowrap">
+                          <div className="min-w-0">
                             <p className="font-medium">
                               {user.name}
                               {isSelf && (
                                 <span className="ml-2 text-xs text-muted-foreground">(tú)</span>
                               )}
                             </p>
-                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                            <p className="break-all text-sm text-muted-foreground md:break-normal">{user.email}</p>
+                            {!user.active && (
+                              <Badge variant="secondary" className="mt-1 md:hidden">
+                                Inactivo
+                              </Badge>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>{getRoleBadge(user.role)}</TableCell>
-                        <TableCell>
+                        <TableCell className="hidden md:table-cell">
                           {user.active ? (
                             <Badge variant="outline" className="border-primary/35 text-primary">
                               Activo
@@ -383,10 +388,10 @@ function UsersSettingsPage() {
                             <Badge variant="secondary">Inactivo</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
+                        <TableCell className="hidden md:table-cell text-muted-foreground">
                           {user.created_at ? formatDate(user.created_at) : '—'}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
+                        <TableCell className="hidden md:table-cell text-muted-foreground">
                           {user.last_sign_in_at ? formatDate(user.last_sign_in_at) : 'Nunca'}
                         </TableCell>
                         <TableCell>

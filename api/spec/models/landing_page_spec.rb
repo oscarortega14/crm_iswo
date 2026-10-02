@@ -82,9 +82,9 @@ RSpec.describe LandingPage, type: :model do
   describe "#public_url" do
     let(:page) { build(:landing_page, tenant: tenant, slug: "black-friday") }
 
-    it "en production usa subdominio crm.iswo.com.co" do
+    it "en production usa subdominio del APP_HOST" do
       allow(Rails.env).to receive(:production?).and_return(true)
-      expect(page.public_url).to eq("https://#{tenant.slug}.crm.iswo.com.co/black-friday")
+      expect(page.public_url).to eq("https://#{tenant.slug}.iswocrm.com/black-friday")
     end
 
     it "en development simula subdominio .localhost" do

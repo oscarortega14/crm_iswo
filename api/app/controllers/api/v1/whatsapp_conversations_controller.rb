@@ -14,11 +14,12 @@ module Api
     # WhatsappMessagePolicy::Scope).
     # ========================================================================
     class WhatsappConversationsController < BaseController
-      before_action :set_contact, only: %i[mark_read send_message]
+      before_action :set_contact, only: %i[mark_read send_message destroy_messages automation]
 
       # GET /api/v1/whatsapp_conversations
       def index
-        base = policy_scope(WhatsappMessage).where.not(contact_id: nil)
+        # Solo contactos activos: el chat de un contacto eliminado no se puede responder.
+        base = policy_scope(WhatsappMessage).where(contact_id: Contact.kept.select(:id))
         base = apply_bucket_scope(base)
 
         unread_counts = base.direction_in.where(read_at: nil).group(:contact_id).count
@@ -39,32 +40,41 @@ module Api
           conversations = conversations.where(contact_id: unread_counts.keys)
         end
 
+        awaiting_ids = awaiting_contact_ids(base)
+        conversations = conversations.where(contact_id: awaiting_ids.to_a) if ActiveModel::Type::Boolean.new.cast(params[:awaiting])
+
         render_collection(
           conversations,
           with:   WhatsappConversationSerializer,
-          params: { unread_counts: unread_counts, current_user: current_user }
+          params: { unread_counts: unread_counts, awaiting_ids: awaiting_ids, current_user: current_user },
+          meta:   { assistant_active: current_tenant.ai_agent_config.active? }
         )
       end
 
       # GET /api/v1/whatsapp_conversations/stats
+      # Liviano a propósito: el SPA lo consulta cada pocos segundos en todas las
+      # pantallas. `latest_inbound_id` sube con cada mensaje entrante nuevo →
+      # el SPA suena y refresca la bandeja solo cuando cambia (en vez de
+      # recargar la lista completa en cada poll).
       def stats
         authorize WhatsappMessage, :index?
-        unread = policy_scope(WhatsappMessage)
-                 .where.not(contact_id: nil)
-                 .direction_in.where(read_at: nil)
-                 .distinct
-                 .count(:contact_id)
+        inbound = policy_scope(WhatsappMessage).where(contact_id: Contact.kept.select(:id)).direction_in
+        unread = inbound.where(read_at: nil).distinct.count(:contact_id)
+        latest_inbound_id = inbound.reorder(nil).maximum(:id)
 
-        render json: { data: { unread: unread } }, status: :ok
+        render json: { data: { unread: unread, latest_inbound_id: latest_inbound_id,
+                               awaiting: awaiting_contact_ids(inbound).size } }, status: :ok
       end
 
       # PATCH /api/v1/whatsapp_conversations/:contact_id/mark_read
       def mark_read
         authorize @contact, :show?
-        count = policy_scope(WhatsappMessage)
-                .inbound
-                .where(contact_id: @contact.id, read_at: nil)
-                .update_all(read_at: Time.current)
+        unread = policy_scope(WhatsappMessage).inbound.where(contact_id: @contact.id, read_at: nil)
+        latest_unread_id = unread.reorder(nil).maximum(:id)
+        count = unread.update_all(read_at: Time.current)
+
+        # «Visto» en WhatsApp (doble check azul para el lead). Async: no frena la bandeja.
+        WhatsappReadReceiptJob.perform_later(latest_unread_id) if latest_unread_id
 
         Notification.where(
           user: current_user, resource: @contact,
@@ -82,6 +92,43 @@ module Api
           user_agent:  request.user_agent
         )
         head :no_content
+      end
+
+      # PATCH /api/v1/whatsapp_conversations/:contact_id/automation { paused: true|false }
+      # «Pausar automático»: un asesor toma el control y no se envían respuestas
+      # automáticas a este contacto (hoy: «Mensaje al autorizar»; luego: agente IA).
+      def automation
+        authorize @contact, :reply_whatsapp?
+        paused = ActiveModel::Type::Boolean.new.cast(params.require(:paused))
+        @contact.update_columns(whatsapp_automation_paused_at: paused ? Time.current : nil, updated_at: Time.current)
+
+        AuditLogger.record!(
+          tenant: current_tenant, user: current_user,
+          action: paused ? "whatsapp_automation_paused" : "whatsapp_automation_resumed",
+          entity_type: "Contact", entity_id: @contact.id,
+          ip_address: request.remote_ip, user_agent: request.user_agent
+        )
+        render json: { data: { paused: paused } }, status: :ok
+      end
+
+      # DELETE /api/v1/whatsapp_conversations/:contact_id/messages — «Eliminar
+      # conversación»: borra del CRM los mensajes de WhatsApp de ese contacto
+      # (no del celular del cliente). Admin, manager o el dueño del contacto.
+      def destroy_messages
+        authorize @contact, :update?
+        count = WhatsApp::ConversationEraser.call(policy_scope(WhatsappMessage).where(contact_id: @contact.id))
+
+        AuditLogger.record!(
+          tenant:      current_tenant,
+          user:        current_user,
+          action:      "whatsapp_conversation_deleted",
+          entity_type: "Contact",
+          entity_id:   @contact.id,
+          metadata:    { count: count },
+          ip_address:  request.remote_ip,
+          user_agent:  request.user_agent
+        )
+        render json: { data: { deleted: count } }, status: :ok
       end
 
       # POST /api/v1/whatsapp_conversations/:contact_id/send_message
@@ -108,8 +155,7 @@ module Api
           render json: {
             error:   "whatsapp_not_configured",
             message: "Configura el envío saliente en Ajustes → Integraciones: " \
-                     "WhatsApp Cloud API (Phone number ID + access token), " \
-                     "Twilio (Account SID + Auth Token + número E.164) " \
+                     "WhatsApp Cloud API (Phone number ID + access token) " \
                      "u OpenWA (URL + API Key + Session ID)."
           }, status: :unprocessable_entity
         when :invalid
@@ -146,6 +192,13 @@ module Api
         else
           scope
         end
+      end
+
+      # Contactos visibles para el usuario que dijeron «Sí» y esperan respuesta de una persona.
+      def awaiting_contact_ids(messages)
+        Contact.kept.whatsapp_awaiting_reply
+               .where(id: messages.reorder(nil).distinct(false).select(:contact_id))
+               .pluck(:id).to_set
       end
 
       def set_contact

@@ -54,4 +54,43 @@ RSpec.describe "Api::V1::Exports", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  describe "GET /api/v1/exports/:id/download" do
+    let!(:ready_export) do
+      create(:export, :ready, tenant: tenant, user: manager, resource: "contacts", format: "xlsx")
+    end
+
+    it "registra AuditEvent action=export_download al descargar (ISO A.7.10)" do
+      expect {
+        get "/api/v1/exports/#{ready_export.id}/download", headers: auth_headers(manager)
+      }.to change(AuditEvent, :count).by(1)
+
+      expect(response).to have_http_status(:found) # redirect al file_url https://
+
+      event = AuditEvent.last
+      expect(event.action).to      eq("export_download")
+      expect(event.entity_type).to eq("Contact")
+      expect(event.entity_id).to   eq(ready_export.id)
+    end
+
+    it "consultant no puede descargar (404 vía policy_scope) y no audita" do
+      consultant = create(:user, :consultant, tenant: tenant)
+
+      expect {
+        get "/api/v1/exports/#{ready_export.id}/download", headers: auth_headers(consultant)
+      }.not_to change(AuditEvent, :count)
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "422 sin auditar si el export aún no está listo" do
+      pending_export = create(:export, tenant: tenant, user: manager, status: "queued")
+
+      expect {
+        get "/api/v1/exports/#{pending_export.id}/download", headers: auth_headers(manager)
+      }.not_to change(AuditEvent, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
 end

@@ -93,7 +93,8 @@ module Reminders
         from_number: from,
         to_number:   to,
         body:        StaffWhatsappBody.for(@reminder),
-        status:      "queued"
+        status:      "queued",
+        automated:   true
       )
       # Best-effort: la campana in-app no debe bloquear el encolado real del
       # mensaje (antes, si notify_in_app! fallaba, el mensaje quedaba

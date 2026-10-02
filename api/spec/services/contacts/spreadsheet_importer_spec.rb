@@ -131,4 +131,95 @@ RSpec.describe Contacts::SpreadsheetImporter do
       expect(log.changes_data).to include("origin" => "contact_import", "stage" => "Propuesta Enviada")
     end
   end
+
+  describe "plantilla en español (Nombres, Apellidos, Celular, Email, Ciudad, País)" do
+    # Columnas opcionales Ciudad/País/Etapa: siguen soportadas fuera de la plantilla base.
+    let(:header) { "Nombres,Apellidos,Celular (con indicativo),Email,Ciudad,País,Etapa" }
+
+    def import(rows)
+      csv = ([ header ] + rows).join("\n") + "\n"
+      described_class.new(tenant: tenant, user: user, io: csv_io(csv), filename: "plantilla.csv").call
+    end
+
+    def contact(email)
+      ActsAsTenant.with_tenant(tenant) { Contact.find_by(email: email) }
+    end
+
+    it "carga nombres, apellidos, celular con indicativo, email, ciudad y país" do
+      result = import([ "Laura,Gómez Pérez,+573001234567,laura@e.co,Bogotá,Colombia," ])
+
+      expect(result.created_count).to eq(1)
+      expect(result.warnings).to be_empty
+      c = contact("laura@e.co")
+      expect([ c.first_name, c.last_name, c.phone_e164, c.city, c.country ])
+        .to eq([ "Laura", "Gómez Pérez", "+573001234567", "Bogotá", "CO" ])
+    end
+
+    it "acepta el celular sin «+» que deja Excel (573001234567) y con espacios" do
+      import([ "Ana,Ruiz,573001112233,ana@e.co,Cali,Colombia,", "Beto,Paz,+52 55 1234 5678,beto@e.co,CDMX,México," ])
+
+      expect(contact("ana@e.co").phone_e164).to eq("+573001112233")
+      expect(contact("beto@e.co")).to have_attributes(phone_e164: "+525512345678", country: "MX")
+    end
+
+    it "sin País toma el país del indicativo del celular" do
+      import([ "Carla,Díaz,+51987654321,carla@e.co,Lima,," ])
+      expect(contact("carla@e.co").country).to eq("PE")
+    end
+
+    it "acepta códigos de país de 2 letras" do
+      import([ "Dani,Ruiz,+593991234567,dani@e.co,Quito,ec," ])
+      expect(contact("dani@e.co").country).to eq("EC")
+    end
+
+    it "avisa por fila si el celular, el email o el país no son válidos (e importa igual)" do
+      result = import([ "Eva,Mora,12345,correo-malo,Bogotá,Narnia," ])
+
+      expect(result.created_count).to eq(1)
+      messages = result.warnings.map { |w| w[:message] }
+      expect(messages).to include(a_string_matching(/celular «12345» no es válido/))
+      expect(messages).to include(a_string_matching(/email «correo-malo» no es válido/))
+      expect(messages).to include(a_string_matching(/país «Narnia» no reconocido; se usó CO/))
+      expect(result.warnings.map { |w| w[:row] }.uniq).to eq([ 2 ])
+    end
+  end
+
+  describe "plantilla: Nombres, Apellidos, Cédula o NIT, Celular, Correo, Origen del lead" do
+    def import(rows)
+      csv = ([ described_class::TEMPLATE_HEADERS.join(",") ] + rows).join("\n") + "\n"
+      described_class.new(tenant: tenant, user: user, io: csv_io(csv), filename: "base.csv").call
+    end
+
+    def contact(email)
+      ActsAsTenant.with_tenant(tenant) { Contact.find_by(email: email) }
+    end
+
+    it "con cédula crea persona natural y guarda el documento limpio" do
+      result = import([ "Laura,Gómez Pérez,CC 1.020.304.050,+573001234567,laura@e.co,Feria ISO" ])
+      expect(result.errors).to be_empty
+      expect(contact("laura@e.co")).to have_attributes(kind: "person", first_name: "Laura", last_name: "Gómez Pérez",
+                                                       document_id: "1020304050", phone_e164: "+573001234567")
+    end
+
+    it "con NIT crea empresa y usa «Nombres» como razón social" do
+      import([ "Constructora Andina S.A.S.,,900123456-7,+576014567890,compras@andina.co,Referido" ])
+      c = contact("compras@andina.co")
+      expect(c).to have_attributes(kind: "company", company_name: "Constructora Andina S.A.S.",
+                                   first_name: nil, document_id: "900123456-7")
+    end
+
+    it "el origen se asigna como fuente del lead de la oportunidad (existente o nueva)" do
+      pipeline = create(:pipeline, tenant: tenant, is_default: true)
+      create(:pipeline_stage, tenant: tenant, pipeline: pipeline, name: "Nueva", position: 0)
+      existing = ActsAsTenant.with_tenant(tenant) { create(:lead_source, tenant: tenant, name: "Feria ISO", kind: "manual") }
+      import([ "Ana,Ruiz,1020304050,,ana@e.co,feria iso", "Beto,Paz,79123456,,beto@e.co,Facebook campaña septiembre" ])
+
+      ActsAsTenant.with_tenant(tenant) do
+        expect(contact("ana@e.co").opportunities.first.lead_source).to eq(existing)
+        created = contact("beto@e.co").opportunities.first.lead_source
+        expect(created).to have_attributes(name: "Facebook campaña septiembre", kind: "meta")
+        expect(contact("beto@e.co").origins.map { |o| o["label"] }).to include("Facebook campaña septiembre")
+      end
+    end
+  end
 end

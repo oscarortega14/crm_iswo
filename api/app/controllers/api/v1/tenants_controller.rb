@@ -24,11 +24,24 @@ module Api
 
       private
 
+      # settings["email_marketing"] (EmailMarketing::Sender) y settings["ai_agent"]
+      # (AiAgent::Config) tienen su propia pantalla y validaciones: no se pisan
+      # desde este PATCH genérico.
+      MANAGED_SETTINGS = %w[email_marketing ai_agent].freeze
       def tenant_params
-        params.require(:tenant).permit(
+        permitted = params.require(:tenant).permit(
           :name, :legal_name, :tax_id, :logo_url, :brand_color,
           :timezone, :locale, :currency, settings: {}
         )
+        attrs = permitted.to_h
+        if attrs.key?("settings")
+          attrs["settings"] = attrs["settings"].except(*MANAGED_SETTINGS)
+          MANAGED_SETTINGS.each do |key|
+            value = current_tenant.settings&.dig(key)
+            attrs["settings"][key] = value if value.present?
+          end
+        end
+        attrs
       end
     end
   end

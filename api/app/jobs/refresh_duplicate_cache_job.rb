@@ -1,21 +1,16 @@
 # frozen_string_literal: true
 
 # ============================================================================
-# RefreshDuplicateCacheJob — recorre contactos y genera DuplicateFlags.
+# RefreshDuplicateCacheJob — escaneo diario de duplicados (config/recurring.yml)
 # ============================================================================
-# Programado nocturno (sidekiq-scheduler). Escanea los contactos creados
-# en las últimas 24h y busca candidatos duplicados dentro del tenant.
-# Por cada match >= 0.85 crea un DuplicateFlag pending (idempotente por el
-# índice único del par).
-#
-# Alternativa: se podría mover a un MATERIALIZED VIEW refrescada aquí, pero
-# la tabla de flags sirve bien para la UI de resolución.
+# Corre DuplicateFlags::Scanner en cada tenant activo: mismo contacto con varias
+# oportunidades abiertas y contactos distintos con el mismo celular o correo.
+# Las alertas quedan a nombre del primer admin del tenant (detected_by_user es
+# obligatorio). Antes este job usaba columnas inexistentes (contact_a_id) y
+# fallaba todos los días apenas había un contacto nuevo.
 # ============================================================================
 class RefreshDuplicateCacheJob < ApplicationJob
   queue_as :low
-
-  SCAN_WINDOW = 24.hours
-  DUP_THRESHOLD = 0.85
 
   def perform
     ActsAsTenant.without_tenant do
@@ -28,30 +23,12 @@ class RefreshDuplicateCacheJob < ApplicationJob
   private
 
   def scan_tenant(tenant)
-    recent = tenant.contacts.where("created_at > ?", SCAN_WINDOW.ago)
-    recent.find_each do |contact|
-      matches = Opportunities::DuplicateDetector.new(
-        phone:              contact.phone_e164,
-        email:              contact.email,
-        full_name:          contact.full_name,
-        exclude_contact_id: contact.id,
-        threshold:          DUP_THRESHOLD
-      ).call
+    actor = tenant.users.where(role: "admin").order(:id).first
+    return unless actor
 
-      matches.each do |m|
-        create_flag(tenant, contact, m)
-      end
-    end
-  end
-
-  def create_flag(tenant, contact, match)
-    a, b = [contact.id, match.contact.id].sort
-    DuplicateFlag.find_or_create_by!(tenant: tenant, contact_a_id: a, contact_b_id: b) do |f|
-      f.matched_on  = match.matched_on
-      f.match_score = match.score
-      f.resolution  = "pending"
-    end
-  rescue ActiveRecord::RecordNotUnique
-    # índice único en (contact_a_id, contact_b_id) — carrera benigna.
+    result = DuplicateFlags::Scanner.call(tenant: tenant, actor: actor)
+    Rails.logger.info("[RefreshDuplicateCacheJob] tenant=#{tenant.id} grupos=#{result.scanned} alertas=#{result.created}")
+  rescue StandardError => e
+    Rails.logger.error("[RefreshDuplicateCacheJob] tenant=#{tenant.id}: #{e.class} #{e.message}")
   end
 end

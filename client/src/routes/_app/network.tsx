@@ -66,6 +66,7 @@ import { useAuthStore, useTenant } from '@/stores/auth'
 import { toast } from 'sonner'
 import { AppPageShell } from '@/components/layout/AppPageShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { statGridClass } from '@/lib/layoutClasses'
 
 export const Route = createFileRoute('/_app/network')({
   beforeLoad: () => requireRole('admin', 'manager', 'consultant'),
@@ -411,8 +412,8 @@ function NetworkPage() {
 
       {/* Controles admin */}
       {canPickRoot && (
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="space-y-1.5 min-w-[220px]">
+        <div className="flex flex-wrap items-end gap-3 sm:gap-4">
+          <div className="min-w-0 flex-1 space-y-1.5 sm:min-w-[220px] sm:flex-none">
             <label className="text-sm font-medium">Raíz del árbol</label>
             <Select
               value={rootUserId ?? '__me__'}
@@ -444,7 +445,7 @@ function NetworkPage() {
               onValueChange={(v) => { setTreeDepth(Number(v)); setSelectedNode(null) }}
               disabled={!rootUserId}
             >
-              <SelectTrigger className="w-[100px]">
+              <SelectTrigger className="w-[120px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -503,7 +504,7 @@ function NetworkPage() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className={`${statGridClass} md:grid-cols-3`}>
         {[
           { icon: User, label: 'Consultores', value: stats.consultants, color: 'bg-sky-500/10 text-sky-600' },
           { icon: NetworkIcon, label: 'Relaciones', value: stats.links, color: 'bg-violet-500/10 text-violet-600' },
@@ -527,13 +528,13 @@ function NetworkPage() {
 
       {/* Buscador + controles de zoom */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Buscar por nombre o rol…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 w-56"
+            className="w-full pl-9 sm:w-56"
           />
         </div>
         <div className="flex items-center gap-2">

@@ -4,11 +4,9 @@ module Api
   module V1
     module Webhooks
       # ========================================================================
-      # Webhooks::WhatsappController — Twilio WhatsApp + Meta Cloud API
+      # Webhooks::WhatsappController — Meta Cloud API
       # ========================================================================
-      # Soporta dos proveedores con el mismo pipeline:
-      #   - Twilio:  POST application/x-www-form-urlencoded (X-Twilio-Signature)
-      #   - Cloud:   GET verify + POST JSON (X-Hub-Signature-256)
+      #   - Cloud: GET verify + POST JSON (X-Hub-Signature-256)
       #
       # Cada mensaje entrante se encola en WebhookProcessorJob, que:
       #   1. resuelve el tenant por el número destino (to_number)
@@ -25,21 +23,7 @@ module Api
         skip_before_action :resolve_tenant!,               raise: false
         skip_around_action :scope_to_tenant,               raise: false
 
-        before_action :verify_twilio_signature!, only: :twilio
-        before_action :verify_cloud_signature!,  only: :cloud
-
-        # POST /api/v1/webhooks/whatsapp/twilio
-        def twilio
-          payload = request.request_parameters
-          # inline: la respuesta del teléfono debe persistirse ya; outbound usa
-          # perform_now y no necesita webhook, inbound sí depende de este POST.
-          enqueue_webhook_processor(
-            "whatsapp_twilio",
-            payload.merge("received_at" => Time.current.iso8601),
-            inline: true
-          )
-          head :ok
-        end
+        before_action :verify_cloud_signature!, only: :cloud
 
         # GET /api/v1/webhooks/whatsapp/cloud (verify)
         def verify_cloud
@@ -64,28 +48,6 @@ module Api
         end
 
         private
-
-        # Valida firma de Twilio según auth token. Si no hay token configurado
-        # (dev), deja pasar.
-        def verify_twilio_signature!
-          token = ENV["TWILIO_AUTH_TOKEN"].to_s
-          return head :forbidden if token.blank? && Rails.env.production?
-          return if token.blank?
-
-          signature = request.headers["X-Twilio-Signature"].to_s
-          url       = request.original_url
-          data      = request.request_parameters.sort.join
-          expected  = Base64.strict_encode64(OpenSSL::HMAC.digest("SHA1", token, url + data))
-
-          return if ActiveSupport::SecurityUtils.secure_compare(signature, expected)
-
-          Rails.logger.warn(
-            "[WhatsApp Twilio] firma inválida url=#{url} " \
-            "(¿API_PUBLIC_ORIGIN/ngrok distinto al webhook de Twilio Console? " \
-            "¿TWILIO_AUTH_TOKEN coincide con el Auth Token de la cuenta?)"
-          )
-          head :forbidden
-        end
 
         def verify_cloud_signature!
           secret = ENV["META_APP_SECRET"].to_s

@@ -3,7 +3,7 @@
 # ============================================================================
 # WebhookEnqueue — encola WebhookProcessorJob sin tumbar la respuesta HTTP.
 # ============================================================================
-# Si falla al encolar, los proveedores (Meta, Google, Twilio) reciben 200 OK
+# Si falla al encolar, los proveedores (Meta, Google) reciben 200 OK
 # para evitar reintentos infinitos; el fallo queda en log.
 #
 # `inline: true` usa perform_now (recomendado para WhatsApp inbound en local:

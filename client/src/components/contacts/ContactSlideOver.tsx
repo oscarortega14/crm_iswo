@@ -1,3 +1,4 @@
+import { originDetail, originKindLabel } from '@/lib/contactOrigins'
 import {
   Mail,
   Phone,
@@ -258,14 +259,30 @@ export function ContactSlideOver({
                   </div>
                 )}
 
-                {contact.sourceLabel && (
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
+                {(contact.origins?.length || contact.sourceLabel) && (
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
                       <Radio className="h-4 w-4 text-muted-foreground" />
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Origen del lead</p>
-                      <p className="text-sm">{contact.sourceLabel}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">
+                        {(contact.origins?.length ?? 0) > 1 ? 'Orígenes del lead' : 'Origen del lead'}
+                      </p>
+                      {contact.origins?.length ? (
+                        <ul className="space-y-0.5">
+                          {contact.origins.map((o, i) => (
+                            <li key={`${o.kind}-${o.label ?? ''}-${i}`} className="text-sm">
+                              <span className="font-medium">{originKindLabel(o.kind)}</span>
+                              {originDetail(o) && <span className="text-muted-foreground"> · {originDetail(o)}</span>}
+                              {o.at && (
+                                <span className="text-xs text-muted-foreground"> · {formatRelativeTime(o.at)}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm">{contact.sourceLabel}</p>
+                      )}
                     </div>
                   </div>
                 )}

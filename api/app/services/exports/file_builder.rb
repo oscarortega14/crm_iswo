@@ -39,15 +39,15 @@ module Exports
       wb    = pkg.workbook
       count = 0
 
+      text = wb.styles.add_style(format_code: "@")
       wb.add_worksheet(name: @resource.titleize) do |sheet|
-        headers = nil
-        @scope.find_each do |r|
-          headers ||= export_headers(r)
-          sheet.add_row(headers) if count.zero?
-          sheet.add_row(headers.map { |h| r.attributes[h] })
+        sheet.add_row(headers)
+        text_cols = headers.each_index.map { |i| TEXT_COLUMNS.include?(headers[i]) ? text : nil }
+        each_record do |r|
+          # Cédula/NIT y celular como texto: Excel no les quita ceros ni el «+».
+          sheet.add_row(row_for(r), style: text_cols, types: headers.map { |h| TEXT_COLUMNS.include?(h) ? :string : nil })
           count += 1
         end
-        sheet.add_row(export_headers(@scope.first)) if count.zero? && @scope.none?
       end
 
       pkg.serialize(path)
@@ -59,23 +59,36 @@ module Exports
 
       path    = tmp_path("csv")
       count   = 0
-      headers = nil
 
-      CSV.open(path, "w") do |csv|
-        @scope.find_each do |r|
-          headers ||= export_headers(r)
-          csv << headers if count.zero?
-          csv << headers.map { |h| r.attributes[h] }
+      # BOM UTF-8 para que Excel muestre bien tildes y eñes al abrir el CSV.
+      File.write(path, "\uFEFF")
+      CSV.open(path, "a") do |csv|
+        csv << headers
+        each_record do |r|
+          csv << row_for(r)
           count += 1
         end
-        csv << (headers || []) if count.zero?
       end
 
       [path, count]
     end
 
-    def export_headers(record)
-      record.attributes.keys.sort
+    TEXT_COLUMNS = [ "Cédula o NIT", "Celular" ].freeze
+
+    def columns
+      @columns ||= Exports::Columns.for(@resource)
+    end
+
+    def headers
+      columns.map(&:first)
+    end
+
+    def row_for(record)
+      columns.map { |(_, value)| value.call(record) }
+    end
+
+    def each_record(&)
+      @scope.includes(Exports::Columns.preload(@resource)).find_each(&)
     end
 
     def tmp_path(ext)

@@ -24,6 +24,13 @@ class DuplicateFlag < ApplicationRecord
 
   scope :pending,  -> { resolution_pending }
   scope :resolved, -> { where.not(resolution: "pending") }
+  # Pendientes que todavía se pueden resolver: las dos oportunidades siguen
+  # activas y abiertas. Si una se eliminó, se cerró o se fusionó, la alerta ya
+  # no aplica y no debe contar en la pantalla ni en el contador del menú.
+  scope :actionable, lambda {
+    live = Opportunity.kept.open.select(:id)
+    resolution_pending.where(opportunity_id: live).where(duplicate_of_opportunity_id: live)
+  }
 
   # Aliases usados por DuplicateFlagSerializer (oportunidad nueva vs existente).
   def opportunity_a_id = opportunity_id

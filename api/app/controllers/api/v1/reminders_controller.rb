@@ -48,10 +48,12 @@ module Api
 
       def create
         authorize @opportunity, :update?
-        reminder = @opportunity.reminders.new(reminder_params.merge(
-          tenant: current_tenant,
-          user:   current_user
-        ))
+        # admin/manager pueden asignar el recordatorio a otro consultor via user_id
+        # (permitido en reminder_params); si no lo mandan, o si el rol no puede
+        # mandarlo, el creador queda como responsable por defecto.
+        attrs = reminder_params.merge(tenant: current_tenant)
+        attrs[:user_id] = current_user.id if attrs[:user_id].blank?
+        reminder = @opportunity.reminders.new(attrs)
         if reminder.save
           @reminder = reminder
           ReminderCreatedNotificationJob.perform_later(reminder.id)

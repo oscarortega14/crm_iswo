@@ -82,50 +82,6 @@ RSpec.describe Ads::ConnectionTester do
       end
     end
 
-    context "provider twilio" do
-      let(:integration) do
-        build(:ad_integration, :twilio,
-              tenant: tenant,
-              credentials: { "account_sid" => "ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "auth_token" => "fake-token-32chars-long-xx" })
-      end
-
-      it "devuelve true si Twilio responde 200 al GET Account" do
-        stub_request(:get, "https://api.twilio.com/2010-04-01/Accounts/ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json")
-          .to_return(status: 200, body: { sid: "ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }.to_json,
-                     headers: { "Content-Type" => "application/json" })
-
-        expect(described_class.new(integration).call).to be(true)
-      end
-
-      it "devuelve false si Twilio responde 401" do
-        stub_request(:get, "https://api.twilio.com/2010-04-01/Accounts/ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json")
-          .to_return(status: 401, body: { message: "Authenticate" }.to_json,
-                     headers: { "Content-Type" => "application/json" })
-
-        expect(described_class.new(integration).call).to be(false)
-      end
-
-      it "devuelve false sin credenciales" do
-        empty = build(:ad_integration, :twilio, tenant: tenant, credentials: {})
-        expect(described_class.new(empty).call).to be(false)
-      end
-
-      it "devuelve mensaje claro si Account SID es SK (API Key) en lugar de AC" do
-        bad = build(:ad_integration, :twilio, tenant: tenant,
-                    credentials: {
-                      "account_sid" => "SKaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                      "auth_token" => "some-secret"
-                    })
-        allow(bad).to receive(:id).and_return(3)
-
-        result = described_class.new(bad).test
-        expect(result.success?).to be(false)
-        expect(result.message).to include("AC").and include("SK")
-        expect(result.message).to include("integración Twilio en CRM (id 3)")
-      end
-    end
-
     context "provider whatsapp_cloud" do
       let(:integration) do
         create(:ad_integration, :cloud, tenant: tenant,

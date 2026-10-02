@@ -10,6 +10,10 @@ module Opportunities
 
     SKIP_OPP_CUSTOM_KEYS = %w[bant_data landing_submission].freeze
     UTM_KEYS = %w[utm_source utm_medium utm_campaign utm_term utm_content].freeze
+    # Datos de contacto e identificación: no aportan a la temperatura y no deben
+    # salir hacia la API de Anthropic (ISO A.8.11). Se filtran también en el
+    # formulario de landing y en campos personalizados, por clave.
+    PII_KEY_PATTERN = /e-?mail|correo|phone|tel[eé]fono|celular|m[oó]vil|whatsapp|document|c[eé]dula|\bdni\b/i
 
     def initialize(opportunity)
       @opp = opportunity
@@ -53,9 +57,6 @@ module Opportunities
       [
         signal("Contacto", "Nombre", c.display_name),
         signal("Contacto", "Tipo", c.kind),
-        signal("Contacto", "Correo", c.email),
-        signal("Contacto", "Teléfono", c.phone_display_value),
-        signal("Contacto", "Documento", c.document_id_safe),
         signal("Contacto", "Empresa", c.company_name),
         signal("Contacto", "Cargo", c.job_title),
         signal("Contacto", "Ciudad", c.city),
@@ -113,6 +114,7 @@ module Opportunities
       labels = field_labels_for(entity)
       fields.stringify_keys.except(*skip_keys).filter_map do |key, raw|
         next if raw.nil? || raw.to_s.strip.blank?
+        next if pii_key?(key) || pii_key?(labels[key])
 
         signal("Campos", labels[key] || key.humanize, format_custom_value(raw))
       end
@@ -131,7 +133,7 @@ module Opportunities
         payload = submission["payload"] || submission[:payload]
         if payload.is_a?(Hash)
           payload.each do |k, v|
-            next if UTM_KEYS.include?(k.to_s)
+            next if UTM_KEYS.include?(k.to_s) || pii_key?(k)
             next if v.nil? || v.to_s.strip.blank?
 
             out << signal("Formulario landing", k.humanize, v.to_s.truncate(200))
@@ -198,6 +200,10 @@ module Opportunities
       when Hash, Array then raw.to_json.truncate(200)
       else raw.to_s.truncate(200)
       end
+    end
+
+    def pii_key?(key)
+      key.to_s.match?(PII_KEY_PATTERN)
     end
 
     def signal(group, label, value)

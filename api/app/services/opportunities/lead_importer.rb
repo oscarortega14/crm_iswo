@@ -88,6 +88,7 @@ module Opportunities
       ).call
 
       if matches.any?
+        matches.first.contact.record_origin!(@source_kind, @source_label) # volvió a entrar por otra vía
         [matches.first.contact, matches.first]
       else
         contact = @tenant.contacts.create!(

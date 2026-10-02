@@ -34,6 +34,7 @@ class User < ApplicationRecord
   has_many :notifications,        dependent: :destroy
   has_many :opportunity_logs,     dependent: :nullify
   has_many :exports,              dependent: :nullify
+  has_many :appointments,         foreign_key: :owner_user_id, dependent: :nullify
 
   # Red de referidos (self-referential many-to-many)
   has_many :outgoing_referrals,

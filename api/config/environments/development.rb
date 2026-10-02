@@ -84,7 +84,7 @@ Rails.application.configure do
 
   # Jobs sin Redis — eliminado Sidekiq; ver Solid Queue (config/queue.yml, recurring.yml).
 
-  # Permitir dominios ngrok/tunnel para callbacks de Twilio y Meta en desarrollo.
+  # Permitir dominios ngrok/tunnel para callbacks de Meta en desarrollo.
   public_origin = ENV["API_PUBLIC_ORIGIN"].presence || ENV["NGROK_URL"].presence
   ngrok_host = public_origin.to_s.gsub(%r{^https?://}, "").presence
   config.hosts << ngrok_host if ngrok_host

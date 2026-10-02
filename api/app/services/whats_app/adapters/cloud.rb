@@ -68,6 +68,32 @@ module WhatsApp
         }
       end
 
+      # Marca como leído en WhatsApp (el lead ve el doble check azul). Meta
+      # marca también todos los mensajes anteriores de esa conversación.
+      # https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-message-as-read
+      def mark_read(provider_message_id)
+        return false if provider_message_id.blank?
+
+        token, phone_number_id, api_version = cloud_credentials_and_version
+        return false if token.blank? || phone_number_id.blank?
+
+        conn = Faraday.new(url: BASE_URL) do |f|
+          f.request  :json
+          f.response :json, content_type: /\bjson$/
+          f.options.timeout      = DEFAULT_TIMEOUT
+          f.options.open_timeout = DEFAULT_TIMEOUT
+        end
+
+        res = conn.post("/#{api_version}/#{phone_number_id}/messages") do |req|
+          req.headers["Authorization"] = "Bearer #{token}"
+          req.body = { messaging_product: "whatsapp", status: "read", message_id: provider_message_id }
+        end
+        return true if res.success?
+
+        Rails.logger.warn("[WhatsApp Cloud] mark_read falló (#{res.status}): #{extract_error(res.body)}")
+        false
+      end
+
       private
 
       def cloud_credentials_and_version

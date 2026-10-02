@@ -6,16 +6,17 @@ module Contacts
   # `stage:` (importación con columna "etapa") la ubica directamente en esa etapa
   # del pipeline por defecto; si es de cierre, sincroniza status won/lost.
   class ProspectOpportunityCreator
-    def self.call(contact:, actor:, stage: nil, origin: "contact_create")
-      new(contact: contact, actor: actor, stage: stage, origin: origin).call
+    def self.call(contact:, actor:, stage: nil, origin: "contact_create", lead_source: nil)
+      new(contact: contact, actor: actor, stage: stage, origin: origin, lead_source: lead_source).call
     end
 
-    def initialize(contact:, actor:, stage: nil, origin: "contact_create")
+    def initialize(contact:, actor:, stage: nil, origin: "contact_create", lead_source: nil)
       @contact = contact
       @actor   = actor
       @tenant  = contact.tenant
       @stage   = stage
       @origin  = origin
+      @lead_source = lead_source
     end
 
     def call
@@ -31,7 +32,7 @@ module Contacts
       end
 
       owner  = @contact.owner_user || @actor
-      source = @tenant.lead_sources.find_by(kind: "manual") || @tenant.lead_sources.first
+      source = @lead_source || @tenant.lead_sources.find_by(kind: "manual") || @tenant.lead_sources.first
 
       opp = @tenant.opportunities.create!(
         contact:          @contact,

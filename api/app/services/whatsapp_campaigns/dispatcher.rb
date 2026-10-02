@@ -10,12 +10,15 @@ module WhatsappCampaigns
   # calidad de número de Meta. Reusa el mismo camino de envío que
   # WhatsApp::OutboundSender (mismo adapter, mismo WhatsappDeliveryJob) — una
   # campaña es, para el adapter, una serie de envíos de plantilla 1-a-1.
+  #
+  # Re-chequea opt-in acá además de en WhatsappCampaign#launch! (por si
+  # cambió entre lanzar y despachar), salvo que la plantilla sea
+  # WhatsappTemplate#opt_in_request — ver ese modelo.
   # ============================================================================
   class Dispatcher
     # Campañas siempre van por Meta Cloud API, sin importar qué proveedor usa
-    # el tenant para el chat 1-a-1 (Twilio, etc.) — solo Cloud tiene soporte
-    # de `type: template` en este código. Twilio requeriría Content API
-    # (ContentSid), que no está implementado.
+    # el tenant para el chat 1-a-1 — solo Cloud tiene soporte de `type: template`
+    # en este código.
     WHATSAPP_CLOUD_PROVIDER = "whatsapp_cloud"
 
     def self.call(campaign:)
@@ -52,7 +55,16 @@ module WhatsappCampaigns
     def dispatch_one!(recipient)
       contact = recipient.contact
 
-      unless contact.whatsapp_opted_in?
+      # Re-chequeo al despachar: el contacto pudo responder "No" entre el
+      # lanzamiento y este lote. El opt-out bloquea incluso plantillas de
+      # solicitud de opt-in.
+      if contact.whatsapp_opted_out?
+        recipient.update!(status: "skipped_no_opt_in", skip_reason: "no autorizó WhatsApp (opt-out)")
+        @campaign.increment!(:skipped_no_opt_in_count)
+        return
+      end
+
+      unless @template.opt_in_request? || contact.whatsapp_opted_in?
         recipient.update!(status: "skipped_no_opt_in", skip_reason: "sin opt-in registrado")
         @campaign.increment!(:skipped_no_opt_in_count)
         return
@@ -99,7 +111,8 @@ module WhatsappCampaigns
         template_language:       @template.language,
         template_params:         params,
         template_variable_names: Array(@template.variable_names),
-        status:                  "queued"
+        status:                  "queued",
+        automated:               true
       )
 
       recipient.update!(whatsapp_message: msg, status: "sent")

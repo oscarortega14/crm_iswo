@@ -21,7 +21,8 @@ module Opportunities
     TRIGGERS = {
       "whatsapp_outbound" => "se envió un WhatsApp al lead",
       "whatsapp_inbound"  => "el lead escribió por WhatsApp",
-      "bant_qualified"    => "calificación BANT"
+      "bant_qualified"    => "calificación BANT",
+      "appointment_scheduled" => "se agendó una reunión"
     }.freeze
 
     def self.call(opportunity:, trigger:)

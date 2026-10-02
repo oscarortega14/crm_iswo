@@ -9,7 +9,7 @@
 class AdIntegration < ApplicationRecord
   include TenantScoped
 
-  PROVIDERS = %w[meta google twilio whatsapp_cloud openwa].freeze
+  PROVIDERS = %w[meta google whatsapp_cloud openwa].freeze
   STATUSES  = %w[active paused error revoked].freeze
 
   enum :provider, PROVIDERS.zip(PROVIDERS).to_h, prefix: true

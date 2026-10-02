@@ -6,7 +6,7 @@ FactoryBot.define do
     contact     { association :contact, tenant: tenant }
     opportunity { nil }
     direction   { "out" }
-    provider    { "twilio" }
+    provider    { "whatsapp_cloud" }
     from_number { "+573000000000" }
     to_number   { "+573001112233" }
     body        { "Hola, soy de ISWO" }
@@ -15,7 +15,6 @@ FactoryBot.define do
     trait :inbound  do direction { "in"  } end
     trait :outbound do direction { "out" } end
 
-    trait :twilio   do provider { "twilio"         } end
     trait :cloud    do provider { "whatsapp_cloud" } end
     trait :openwa   do provider { "openwa"         } end
 

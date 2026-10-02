@@ -7,7 +7,7 @@
 # - Reply-to: configurable por tenant (settings.email.reply_to).
 # - Layout "mailer" renderiza header/footer con branding del tenant si está
 #   disponible en `@tenant`.
-# - Delivery vía Postmark (`postmark-rails`) en prod; letter_opener en dev.
+# - Delivery vía AWS SES v2 (`aws-actionmailer-ses`) en prod; letter_opener en dev.
 # ============================================================================
 class ApplicationMailer < ActionMailer::Base
   layout "mailer"

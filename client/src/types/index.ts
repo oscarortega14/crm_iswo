@@ -136,7 +136,7 @@ export interface PipelineStage {
   auto_trigger?: StageAutoTrigger | null
 }
 
-export type StageAutoTrigger = 'whatsapp_outbound' | 'whatsapp_inbound' | 'bant_qualified'
+export type StageAutoTrigger = 'whatsapp_outbound' | 'whatsapp_inbound' | 'bant_qualified' | 'appointment_scheduled'
 
 // Contact Types
 export type ContactKind = 'person' | 'company'
@@ -223,7 +223,7 @@ export interface Export {
 }
 
 // Integration Types
-export type IntegrationType = 'meta_ads' | 'google_ads' | 'whatsapp' | 'twilio'
+export type IntegrationType = 'meta_ads' | 'google_ads' | 'whatsapp'
 export type IntegrationStatus = 'connected' | 'disconnected' | 'error'
 
 export interface Integration {

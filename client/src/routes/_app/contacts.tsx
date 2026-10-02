@@ -18,6 +18,8 @@ import {
   Trash2,
   Upload,
   MessageCircle,
+  MessageCircleOff,
+  MailX,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -66,12 +68,18 @@ import { ContactsQuickMetrics } from '@/components/contacts/ContactsQuickMetrics
 import {
   bulkDeleteContacts,
   bulkMarkWhatsappOptIn,
+  bulkMarkWhatsappOptOut,
+  bulkSetEmailOptOut,
+  EMAIL_OPT_OUT_LABELS,
   contactListErrorMessage,
   deleteContact,
+  fetchAllContacts,
   fetchContactsList,
   fetchContactStats,
   getCompanyLabel,
   type ContactSegment,
+  type ContactWhatsappConsent,
+  WHATSAPP_CONSENT_LABELS,
   type ContactSummary,
 } from '@/lib/contactApi'
 import { jsonApiPrimaryList, mapUserResource } from '@/lib/opportunityApi'
@@ -89,6 +97,7 @@ const contactsSearchSchema = z.object({
   selected: z.string().optional(),
   owner: z.string().optional(),
   segment: z.enum(['clients', 'prospects', 'hot_leads', 'stale']).optional(),
+  consent: z.enum(['confirmed', 'opted_out', 'unconfirmed', 'none']).optional(),
 })
 
 export const Route = createFileRoute('/_app/contacts')({
@@ -123,7 +132,9 @@ function ContactsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [confirmBulkOptIn, setConfirmBulkOptIn] = useState(false)
+  const [confirmBulkOptOut, setConfirmBulkOptOut] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [selectingAllOptIn, setSelectingAllOptIn] = useState(false)
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -151,7 +162,7 @@ function ContactsPage() {
   useEffect(() => {
     setCurrentPage(1)
     setCompanyPage(1)
-  }, [debouncedQ, searchFromUrl.owner, searchFromUrl.segment])
+  }, [debouncedQ, searchFromUrl.owner, searchFromUrl.segment, searchFromUrl.consent])
 
   const { data: contactStats, isLoading: statsLoading } = useQuery({
     queryKey: queryKeys.contacts.stats(authScope),
@@ -179,10 +190,11 @@ function ContactsPage() {
       kind: 'person' as const,
       owner_id: searchFromUrl.owner,
       segment: searchFromUrl.segment,
+      whatsapp_consent: searchFromUrl.consent,
       page: currentPage,
       items: pageSize,
     }),
-    [debouncedQ, searchFromUrl.owner, searchFromUrl.segment, currentPage],
+    [debouncedQ, searchFromUrl.owner, searchFromUrl.segment, searchFromUrl.consent, currentPage],
   )
 
   const listFiltersCompany = useMemo(
@@ -191,10 +203,11 @@ function ContactsPage() {
       kind: 'company' as const,
       owner_id: searchFromUrl.owner,
       segment: searchFromUrl.segment,
+      whatsapp_consent: searchFromUrl.consent,
       page: companyPage,
       items: pageSize,
     }),
-    [debouncedQ, searchFromUrl.owner, searchFromUrl.segment, companyPage],
+    [debouncedQ, searchFromUrl.owner, searchFromUrl.segment, searchFromUrl.consent, companyPage],
   )
 
   const handleSegmentChange = (segment: ContactSegment | undefined) => {
@@ -306,12 +319,49 @@ function ContactsPage() {
           ? `${result.marked} contacto(s) marcado(s) con opt-in de WhatsApp`
           : 'Los contactos seleccionados ya tenían opt-in',
       )
+      if (result.skippedOptedOut > 0) {
+        toast.info(`${result.skippedOptedOut} contacto(s) no autorizaron WhatsApp y se dejaron sin opt-in`)
+      }
       setSelectedIds(new Set())
       setConfirmBulkOptIn(false)
       void invalidateContactsQueries(queryClient)
     },
     onError: (err: unknown) => {
       toast.error(formatRailsError(err, 'No se pudo marcar el opt-in de WhatsApp'))
+    },
+  })
+
+  const emailOptOutMutation = useMutation({
+    mutationFn: ({ ids, optedOut }: { ids: string[]; optedOut: boolean }) => bulkSetEmailOptOut(ids, optedOut),
+    onSuccess: (result, { optedOut }) => {
+      if (optedOut) {
+        toast.success('Listo: ya no recibirá campañas de correo')
+      } else if (result.marked > 0) {
+        toast.success('Listo: vuelve a recibir campañas de correo')
+      } else {
+        toast.error('No se puede reactivar: la baja la pidió el contacto o su correo rebotó')
+      }
+      void invalidateContactsQueries(queryClient)
+    },
+    onError: (err: unknown) => {
+      toast.error(formatRailsError(err, 'No se pudo actualizar la baja de correos'))
+    },
+  })
+
+  const bulkOptOutMutation = useMutation({
+    mutationFn: () => bulkMarkWhatsappOptOut(Array.from(selectedIds)),
+    onSuccess: (result) => {
+      toast.success(
+        result.marked > 0
+          ? `${result.marked} contacto(s) marcado(s) como "No autoriza WhatsApp"`
+          : 'Los contactos seleccionados ya estaban marcados como "No autoriza"',
+      )
+      setSelectedIds(new Set())
+      setConfirmBulkOptOut(false)
+      void invalidateContactsQueries(queryClient)
+    },
+    onError: (err: unknown) => {
+      toast.error(formatRailsError(err, 'No se pudo registrar que no autoriza WhatsApp'))
     },
   })
 
@@ -338,6 +388,33 @@ function ContactsPage() {
       })
       return next
     })
+  }
+
+  /** Trae TODOS los contactos que matchean los filtros activos (no solo la página
+   * actual) y abre el diálogo de confirmación de opt-in ya con los que faltan
+   * seleccionados — evita marcar opt-in de a 10 en 10. */
+  const handleSelectAllWithoutOptIn = async () => {
+    setSelectingAllOptIn(true)
+    try {
+      const all = await fetchAllContacts({
+        q: listFiltersPerson.q,
+        kind: 'person',
+        owner_id: listFiltersPerson.owner_id,
+        segment: listFiltersPerson.segment,
+        whatsapp_consent: listFiltersPerson.whatsapp_consent,
+      })
+      const withoutOptIn = all.filter((c) => !c.whatsappOptedIn && !c.whatsappOptedOut).map((c) => c.id)
+      if (withoutOptIn.length === 0) {
+        toast.info('Todos los contactos (con los filtros actuales) ya tienen opt-in de WhatsApp')
+        return
+      }
+      setSelectedIds(new Set(withoutOptIn))
+      setConfirmBulkOptIn(true)
+    } catch (err) {
+      toast.error(formatRailsError(err, 'No se pudieron cargar los contactos'))
+    } finally {
+      setSelectingAllOptIn(false)
+    }
   }
 
 
@@ -373,6 +450,21 @@ function ContactsPage() {
           <RefreshCw className={`size-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Actualizar</span>
         </Button>
+        {canManageWhatsappOptIn && activeTab === 'contacts' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => void handleSelectAllWithoutOptIn()}
+            disabled={selectingAllOptIn}
+            title="Marca opt-in de WhatsApp a todos los contactos que coinciden con el filtro actual, sin límite de página"
+          >
+            <MessageCircle className={`size-3.5 ${selectingAllOptIn ? 'animate-pulse' : ''}`} />
+            <span className="hidden sm:inline">
+              {selectingAllOptIn ? 'Buscando...' : 'Marcar opt-in a todos'}
+            </span>
+          </Button>
+        )}
         {canImportContacts && (
           <>
             <Button
@@ -432,7 +524,30 @@ function ContactsPage() {
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Select
+              value={searchFromUrl.consent ?? '__all__'}
+              onValueChange={(v) =>
+                navigate({
+                  search: (prev) => ({
+                    ...prev,
+                    consent: v === '__all__' ? undefined : (v as ContactWhatsappConsent),
+                  }),
+                })
+              }
+            >
+              <SelectTrigger className="h-9 min-w-0 flex-1 text-sm sm:w-[190px] sm:flex-none" aria-label="Consentimiento WhatsApp">
+                <SelectValue placeholder="WhatsApp" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">WhatsApp: todos</SelectItem>
+                {(Object.keys(WHATSAPP_CONSENT_LABELS) as ContactWhatsappConsent[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {WHATSAPP_CONSENT_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {showOwnerFilter && (
               <Select
                 value={searchFromUrl.owner ?? '__all__'}
@@ -440,7 +555,7 @@ function ContactsPage() {
                   navigate({ search: (prev) => ({ ...prev, owner: v === '__all__' ? undefined : v }) })
                 }
               >
-                <SelectTrigger className="h-9 w-[150px] text-sm">
+                <SelectTrigger className="h-9 min-w-0 flex-1 text-sm sm:w-[150px] sm:flex-none" aria-label="Consultor">
                   <SelectValue placeholder="Consultor" />
                 </SelectTrigger>
                 <SelectContent>
@@ -465,13 +580,13 @@ function ContactsPage() {
                 Limpiar filtro
               </Button>
             )}
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Buscar (mín. 2 letras)..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9 w-56 sm:w-64"
+                className="w-full pl-9 sm:w-64"
               />
             </div>
           </div>
@@ -493,6 +608,17 @@ function ContactsPage() {
                 >
                   <MessageCircle className="size-3.5" />
                   Marcar opt-in WhatsApp
+                </Button>
+              )}
+              {canManageWhatsappOptIn && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => setConfirmBulkOptOut(true)}
+                >
+                  <MessageCircleOff className="size-3.5" />
+                  No autoriza WhatsApp
                 </Button>
               )}
               {canDeleteContacts && (
@@ -554,11 +680,11 @@ function ContactsPage() {
                           </TableHead>
                         )}
                         <TableHead>Nombre</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Telefono</TableHead>
-                        <TableHead>Empresa</TableHead>
-                        <TableHead>Cargo</TableHead>
-                        <TableHead>Origen</TableHead>
+                        <TableHead className="hidden md:table-cell">Email</TableHead>
+                        <TableHead className="hidden md:table-cell">Telefono</TableHead>
+                        <TableHead className="hidden md:table-cell">Empresa</TableHead>
+                        <TableHead className="hidden md:table-cell">Cargo</TableHead>
+                        <TableHead className="hidden md:table-cell">Origen</TableHead>
                         <TableHead>WhatsApp</TableHead>
                         <TableHead className="w-10"></TableHead>
                       </TableRow>
@@ -597,34 +723,50 @@ function ContactsPage() {
                               />
                             </TableCell>
                           )}
-                          <TableCell>
+                          <TableCell className="whitespace-normal md:whitespace-nowrap">
                             <span className="font-medium">{contact.fullName}</span>
+                            {contact.phone && (
+                              <span className="block text-xs text-muted-foreground md:hidden">{contact.phone}</span>
+                            )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden md:table-cell">
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <Mail className="h-3 w-3" />
                               {contact.email}
+                              {contact.emailOptedOut && (
+                                <Badge
+                                  className="gap-1 bg-amber-500/10 text-amber-700 hover:bg-amber-500/10 text-xs dark:text-amber-300"
+                                  title={
+                                    contact.emailOptOutSource
+                                      ? EMAIL_OPT_OUT_LABELS[contact.emailOptOutSource]
+                                      : 'No recibe campañas de correo'
+                                  }
+                                >
+                                  <MailX className="size-3" />
+                                  Sin correos
+                                </Badge>
+                              )}
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden md:table-cell">
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <Phone className="h-3 w-3" />
                               {contact.phone}
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden md:table-cell">
                             <div className="flex items-center gap-2">
                               <Building2 className="h-3 w-3 text-muted-foreground" />
                               {getCompanyLabel(contact.company)}
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden md:table-cell">
                             <div className="flex items-center gap-2">
                               <Briefcase className="h-3 w-3 text-muted-foreground" />
                               {contact.position ?? '-'}
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden md:table-cell">
                             {contact.sourceLabel ? (
                               <Badge variant="outline" className="text-xs">
                                 {contact.sourceLabel}
@@ -634,7 +776,31 @@ function ContactsPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {contact.whatsappOptedIn ? (
+                            {contact.whatsappOptedOut ? (
+                              <Badge
+                                className="gap-1 bg-destructive/10 text-destructive hover:bg-destructive/10 text-xs"
+                                title={
+                                  contact.whatsappOptOutAt
+                                    ? `No autorizó WhatsApp el ${new Date(contact.whatsappOptOutAt).toLocaleDateString('es-CO')}`
+                                    : 'No autorizó WhatsApp'
+                                }
+                              >
+                                <MessageCircleOff className="size-3" />
+                                No autorizó
+                              </Badge>
+                            ) : contact.whatsappOptedIn && contact.whatsappOptInSource === 'reply_confirm' ? (
+                              <Badge
+                                className="gap-1 bg-green-600/15 text-green-700 hover:bg-green-600/15 text-xs"
+                                title={
+                                  contact.whatsappOptInAt
+                                    ? `Confirmó "Sí" por WhatsApp el ${new Date(contact.whatsappOptInAt).toLocaleDateString('es-CO')}`
+                                    : 'Confirmó "Sí" por WhatsApp'
+                                }
+                              >
+                                <MessageCircle className="size-3" />
+                                Confirmó Sí
+                              </Badge>
+                            ) : contact.whatsappOptedIn ? (
                               <Badge className="gap-1 bg-green-600/10 text-green-700 hover:bg-green-600/10 text-xs">
                                 <MessageCircle className="size-3" />
                                 Opt-in
@@ -672,7 +838,7 @@ function ContactsPage() {
                                 >
                                   Ir a Oportunidades
                                 </DropdownMenuItem>
-                                {canManageWhatsappOptIn && !contact.whatsappOptedIn && (
+                                {canManageWhatsappOptIn && !contact.whatsappOptedIn && !contact.whatsappOptedOut && (
                                   <DropdownMenuItem
                                     onClick={(e) => {
                                       e.stopPropagation()
@@ -681,6 +847,37 @@ function ContactsPage() {
                                     }}
                                   >
                                     Marcar opt-in WhatsApp
+                                  </DropdownMenuItem>
+                                )}
+                                {canManageWhatsappOptIn && !contact.whatsappOptedOut && (
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedIds(new Set([contact.id]))
+                                      setConfirmBulkOptOut(true)
+                                    }}
+                                  >
+                                    No autoriza WhatsApp
+                                  </DropdownMenuItem>
+                                )}
+                                {canManageWhatsappOptIn && contact.email && !contact.emailOptedOut && (
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      emailOptOutMutation.mutate({ ids: [contact.id], optedOut: true })
+                                    }}
+                                  >
+                                    No quiere correos
+                                  </DropdownMenuItem>
+                                )}
+                                {canManageWhatsappOptIn && contact.emailOptOutSource === 'manual' && (
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      emailOptOutMutation.mutate({ ids: [contact.id], optedOut: false })
+                                    }}
+                                  >
+                                    Reactivar correos
                                   </DropdownMenuItem>
                                 )}
                                 {canDeleteContacts && (
@@ -955,6 +1152,29 @@ function ContactsPage() {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => bulkOptInMutation.mutate()}>
               Confirmar opt-in
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmBulkOptOut}
+        onOpenChange={(o) => { if (!o) setConfirmBulkOptOut(false) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>No autoriza WhatsApp — {selectedIds.size} contacto(s)</AlertDialogTitle>
+            <AlertDialogDescription>
+              Registra que estos contactos dijeron que NO quieren recibir mensajes de WhatsApp (por
+              teléfono, email, en persona…). Se les quita el opt-in y quedan fuera de todas las
+              campañas, incluidas las de solicitud de autorización. Solo vuelven a quedar habilitados
+              si ellos mismos responden "Sí" por WhatsApp.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => bulkOptOutMutation.mutate()}>
+              Registrar "No autoriza"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

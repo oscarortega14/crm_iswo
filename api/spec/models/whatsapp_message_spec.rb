@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe WhatsappMessage, type: :model do
   let(:tenant)  { ActsAsTenant.current_tenant }
   let(:contact) { create(:contact, tenant: tenant) }
-  subject { build(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact) }
+  subject { build(:whatsapp_message, :outbound, tenant: tenant, contact: contact) }
 
   describe "asociaciones" do
     it { is_expected.to belong_to(:tenant).optional }
@@ -17,33 +17,33 @@ RSpec.describe WhatsappMessage, type: :model do
     it { is_expected.to validate_presence_of(:from_number) }
     it { is_expected.to validate_presence_of(:to_number) }
     it "solo acepta valores de enum direction válidos" do
-      WhatsappMessage::DIRECTIONS.each { |d| m = build(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, direction: d); expect(m.direction).to eq(d) }
+      WhatsappMessage::DIRECTIONS.each { |d| m = build(:whatsapp_message, :outbound, tenant: tenant, contact: contact, direction: d); expect(m.direction).to eq(d) }
     end
 
     it "solo acepta valores de enum provider válidos" do
-      WhatsappMessage::PROVIDERS.each { |p| m = build(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, provider: p); expect(m.provider).to eq(p) }
+      WhatsappMessage::PROVIDERS.each { |p| m = build(:whatsapp_message, :outbound, tenant: tenant, contact: contact, provider: p); expect(m.provider).to eq(p) }
     end
 
     it "solo acepta valores de enum status válidos" do
-      WhatsappMessage::STATUSES.each { |s| m = build(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, status: s); expect(m.status).to eq(s) }
+      WhatsappMessage::STATUSES.each { |s| m = build(:whatsapp_message, :outbound, tenant: tenant, contact: contact, status: s); expect(m.status).to eq(s) }
     end
 
     it "valida unicidad de provider_message_id por provider" do
-      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, provider_message_id: "SM123")
-      duplicate = build(:whatsapp_message, :outbound, :twilio, tenant: tenant, provider_message_id: "SM123")
+      create(:whatsapp_message, :outbound, tenant: tenant, provider_message_id: "SM123")
+      duplicate = build(:whatsapp_message, :outbound, tenant: tenant, provider_message_id: "SM123")
       expect(duplicate).not_to be_valid
       expect(duplicate.errors[:provider_message_id]).to be_present
     end
 
     it "permite mismo provider_message_id en providers distintos" do
-      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, provider_message_id: "abc123")
-      other = build(:whatsapp_message, :outbound, :cloud, tenant: tenant, provider_message_id: "abc123")
+      create(:whatsapp_message, :outbound, :cloud, tenant: tenant, provider_message_id: "abc123")
+      other = build(:whatsapp_message, :outbound, :openwa, tenant: tenant, provider_message_id: "abc123")
       expect(other).to be_valid
     end
 
     it "permite provider_message_id nil en múltiples mensajes del mismo provider" do
-      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, provider_message_id: nil)
-      expect(build(:whatsapp_message, :outbound, :twilio, tenant: tenant, provider_message_id: nil)).to be_valid
+      create(:whatsapp_message, :outbound, tenant: tenant, provider_message_id: nil)
+      expect(build(:whatsapp_message, :outbound, tenant: tenant, provider_message_id: nil)).to be_valid
     end
   end
 
@@ -53,16 +53,16 @@ RSpec.describe WhatsappMessage, type: :model do
     end
 
     it "expone predicates prefijados" do
-      msg = build(:whatsapp_message, :outbound, :twilio, tenant: tenant, status: "delivered")
+      msg = build(:whatsapp_message, :outbound, tenant: tenant, status: "delivered")
       expect(msg.status_delivered?).to be(true)
       expect(msg.direction_out?).to be(true)
-      expect(msg.provider_twilio?).to be(true)
+      expect(msg.provider_whatsapp_cloud?).to be(true)
     end
   end
 
   describe "scopes" do
-    let!(:inbound)  { create(:whatsapp_message, :inbound,  :twilio, tenant: tenant, contact: contact) }
-    let!(:outbound) { create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact) }
+    let!(:inbound)  { create(:whatsapp_message, :inbound, tenant: tenant, contact: contact) }
+    let!(:outbound) { create(:whatsapp_message, :outbound, tenant: tenant, contact: contact) }
 
     it ".inbound filtra mensajes entrantes" do
       expect(WhatsappMessage.inbound).to include(inbound)
@@ -81,7 +81,7 @@ RSpec.describe WhatsappMessage, type: :model do
 
   describe "opt-in automático al recibir un mensaje entrante" do
     it "marca whatsapp_opt_in_at con source reply_stop_in si el contacto no tenía opt-in" do
-      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact)
 
       expect(contact.reload.whatsapp_opted_in?).to be(true)
       expect(contact.whatsapp_opt_in_source).to eq("reply_stop_in")
@@ -91,19 +91,70 @@ RSpec.describe WhatsappMessage, type: :model do
       contact.mark_whatsapp_opt_in!(source: "manual")
       original_at = contact.whatsapp_opt_in_at
 
-      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact)
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact)
 
       expect(contact.reload.whatsapp_opt_in_source).to eq("manual")
       expect(contact.whatsapp_opt_in_at).to eq(original_at)
     end
 
     it "no marca opt-in para mensajes salientes" do
-      create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact)
+      create(:whatsapp_message, :outbound, tenant: tenant, contact: contact)
       expect(contact.reload.whatsapp_opted_in?).to be(false)
     end
 
     it "no falla si el mensaje no tiene contacto asociado" do
-      expect { create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: nil) }.not_to raise_error
+      expect { create(:whatsapp_message, :inbound, tenant: tenant, contact: nil) }.not_to raise_error
+    end
+  end
+
+  describe "opt-out al recibir una negativa" do
+    it "el botón \"No, autorizo\" registra opt-out y quita el opt-in" do
+      contact.mark_whatsapp_opt_in!(source: "import")
+
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact, body: "No, autorizo")
+
+      contact.reload
+      expect(contact.whatsapp_opted_out?).to be(true)
+      expect(contact.whatsapp_opt_out_source).to eq("reply")
+      expect(contact.whatsapp_opted_in?).to be(false)
+    end
+
+    it "un mensaje cualquiera posterior NO reactiva el opt-in de quien dijo que no" do
+      contact.mark_whatsapp_opt_out!(source: "reply")
+
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact, body: "hola, una pregunta")
+
+      expect(contact.reload.whatsapp_opted_in?).to be(false)
+      expect(contact.whatsapp_opted_out?).to be(true)
+    end
+
+    it "un \"Sí, autorizo\" explícito limpia el opt-out y marca opt-in" do
+      contact.mark_whatsapp_opt_out!(source: "reply")
+
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact, body: "Sí, autorizo")
+
+      contact.reload
+      expect(contact.whatsapp_opted_in?).to be(true)
+      expect(contact.whatsapp_opt_in_source).to eq("reply_confirm")
+      expect(contact.whatsapp_opted_out?).to be(false)
+    end
+
+    it "un \"Sí\" de quien ya tenía opt-in por import lo marca como confirmado (reply_confirm)" do
+      contact.mark_whatsapp_opt_in!(source: "import")
+
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact, body: "Sí, autorizo")
+
+      expect(contact.reload.whatsapp_opt_in_source).to eq("reply_confirm")
+    end
+
+    it "un \"Sí\" repetido no reescribe la fecha de la primera confirmación" do
+      contact.mark_whatsapp_opt_in!(source: "reply_confirm")
+      contact.update_columns(whatsapp_opt_in_at: 2.days.ago)
+      original_at = contact.reload.whatsapp_opt_in_at
+
+      create(:whatsapp_message, :inbound, tenant: tenant, contact: contact, body: "si")
+
+      expect(contact.reload.whatsapp_opt_in_at).to eq(original_at)
     end
   end
 
@@ -113,11 +164,11 @@ RSpec.describe WhatsappMessage, type: :model do
     it "entrante dispara whatsapp_inbound al crearse" do
       expect(Opportunities::StageAutomation).to receive(:call_for_contact)
         .with(contact: contact, opportunity: opp, trigger: "whatsapp_inbound")
-      create(:whatsapp_message, :inbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+      create(:whatsapp_message, :inbound, :cloud, tenant: tenant, contact: contact, opportunity: opp)
     end
 
     it "saliente dispara whatsapp_outbound solo cuando el proveedor confirma el envío" do
-      msg = create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+      msg = create(:whatsapp_message, :outbound, :cloud, tenant: tenant, contact: contact, opportunity: opp)
 
       expect(Opportunities::StageAutomation).to receive(:call_for_contact)
         .with(contact: contact, opportunity: opp, trigger: "whatsapp_outbound").once
@@ -126,7 +177,7 @@ RSpec.describe WhatsappMessage, type: :model do
     end
 
     it "saliente fallido (p.ej. 131047) no dispara" do
-      msg = create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, opportunity: opp)
+      msg = create(:whatsapp_message, :outbound, :cloud, tenant: tenant, contact: contact, opportunity: opp)
 
       expect(Opportunities::StageAutomation).not_to receive(:call_for_contact)
       msg.update!(status: "failed", error_message: "131047")
@@ -134,7 +185,7 @@ RSpec.describe WhatsappMessage, type: :model do
 
     it "ignora mensajes sin contacto (avisos de recordatorio al consultor)" do
       expect(Opportunities::StageAutomation).not_to receive(:call_for_contact)
-      create(:whatsapp_message, :outbound, :twilio, :sent, tenant: tenant, contact: nil, opportunity: opp)
+      create(:whatsapp_message, :outbound, :cloud, :sent, tenant: tenant, contact: nil, opportunity: opp)
     end
   end
 end

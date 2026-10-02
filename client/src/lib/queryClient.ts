@@ -89,6 +89,13 @@ export const queryKeys = {
     list: (authScope: string, filters: Record<string, unknown>) =>
       ['duplicateFlags', 'list', authScope, filters] as const,
   },
+  
+  // Exports
+  exports: {
+    all: ['exports'] as const,
+    list: (authScope: string, filters: Record<string, unknown>) =>
+      ['exports', 'list', authScope, filters] as const,
+  },
 
   // WhatsApp inbox (bandeja de entrada de conversaciones)
   whatsappConversations: {
@@ -99,19 +106,11 @@ export const queryKeys = {
     messages: (contactId: string) => ['whatsappConversations', 'messages', contactId] as const,
   },
 
-  // Exports
-  exports: {
-    all: ['exports'] as const,
-    list: (authScope: string, filters: Record<string, unknown>) =>
-      ['exports', 'list', authScope, filters] as const,
+  // WhatsApp Templates
+  whatsappTemplates: {
+    all: ['whatsappTemplates'] as const,
   },
 
-  // Assets (biblioteca de valor — "Dar Valor Primero")
-  assets: {
-    all: ['assets'] as const,
-    list: (authScope: string) => ['assets', 'list', authScope] as const,
-  },
-  
   // Integrations
   integrations: {
     all: ['integrations'] as const,
@@ -122,12 +121,7 @@ export const queryKeys = {
   leadSources: {
     all: ['leadSources'] as const,
   },
-
-  // WhatsApp Templates
-  whatsappTemplates: {
-    all: ['whatsappTemplates'] as const,
-  },
-
+  
   // Landing Pages (authScope — listas y métricas por sesión)
   landingPages: {
     all: ['landingPages'] as const,

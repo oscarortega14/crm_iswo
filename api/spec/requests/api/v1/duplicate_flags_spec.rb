@@ -102,4 +102,67 @@ RSpec.describe "Api::V1::DuplicateFlags", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  describe "alertas que ya no aplican" do
+    it "no aparecen como pendientes ni cuentan en stats si una oportunidad se eliminó o se cerró" do
+      pipeline = create(:pipeline_with_stages, tenant: tenant)
+      mk = lambda do |**attrs|
+        create(:opportunity, :skip_bant_recalc, tenant: tenant, pipeline: pipeline,
+                                                pipeline_stage: pipeline.pipeline_stages.first, **attrs)
+      end
+      live  = create(:duplicate_flag, tenant: tenant, opportunity: mk.call, duplicate_of_opportunity: mk.call)
+      gone  = mk.call
+      stale_deleted = create(:duplicate_flag, tenant: tenant, opportunity: gone, duplicate_of_opportunity: mk.call)
+      gone.discard
+      stale_closed = create(:duplicate_flag, tenant: tenant, opportunity: mk.call(status: "won"),
+                                             duplicate_of_opportunity: mk.call)
+
+      get "/api/v1/duplicate_flags", params: { resolution: "pending" }, headers: auth_headers(admin)
+      ids = json["data"].map { |d| d["id"].to_i }
+      expect(ids).to include(live.id, flag.id) # `flag`: alerta vigente del setup del archivo
+      expect(ids).not_to include(stale_deleted.id, stale_closed.id)
+
+      get "/api/v1/duplicate_flags/stats", headers: auth_headers(admin)
+      expect(json.dig("data", "pending")).to eq(2)
+    end
+  end
+
+  describe "POST /api/v1/duplicate_flags/scan (contactos distintos)" do
+    it "encuentra dos contactos con el mismo celular y devuelve cuántas alertas creó" do
+      pipeline = create(:pipeline_with_stages, tenant: tenant)
+      2.times do
+        c = create(:contact, tenant: tenant, phone_e164: "+573005556677")
+        create(:opportunity, :skip_bant_recalc, tenant: tenant, contact: c, pipeline: pipeline,
+                                                pipeline_stage: pipeline.pipeline_stages.first)
+      end
+
+      post "/api/v1/duplicate_flags/scan", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:ok)
+      expect(json["created"]).to eq(1)
+    end
+  end
+
+  describe "POST /api/v1/duplicate_flags/:id/merge con contactos distintos" do
+    it "fusiona oportunidades y deja un solo contacto con los orígenes de ambos" do
+      existing_contact = create(:contact, tenant: tenant, first_name: "Ana", phone_e164: "+573003334455", email: nil,
+                                          source_kind: "import", source_label: "Excel: base.xlsx")
+      new_contact = create(:contact, tenant: tenant, first_name: "Ana R", phone_e164: "+573003334455",
+                                     email: "ana@correo.co", source_kind: "web", source_label: "Landing")
+      existing = create(:opportunity, :skip_bant_recalc, tenant: tenant, contact: existing_contact, pipeline: pipeline,
+                                                         pipeline_stage: pipeline.pipeline_stages.first)
+      duplicate = create(:opportunity, :skip_bant_recalc, tenant: tenant, contact: new_contact, pipeline: pipeline,
+                                                          pipeline_stage: pipeline.pipeline_stages.first)
+      f = create(:duplicate_flag, tenant: tenant, opportunity: duplicate, duplicate_of_opportunity: existing)
+
+      post "/api/v1/duplicate_flags/#{f.id}/merge", headers: auth_headers(admin)
+
+      expect(response).to have_http_status(:no_content)
+      expect(new_contact.reload).to be_discarded
+      expect(existing_contact.reload.email).to eq("ana@correo.co")
+      expect(existing_contact.origins.map { |o| o["kind"] }).to contain_exactly("import", "web")
+      expect(duplicate.reload.contact_id).to eq(existing_contact.id)
+      expect(f.reload.resolution).to eq("merged")
+    end
+  end
 end

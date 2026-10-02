@@ -22,7 +22,6 @@ module Auditable
     contacts
     sessions
     audit_events
-    me
     searches
     dashboard
     notifications

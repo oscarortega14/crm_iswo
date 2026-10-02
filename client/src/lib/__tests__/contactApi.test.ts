@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapContactResource } from '@/lib/contactApi'
+import { buildContactListParams, mapContactResource } from '@/lib/contactApi'
 import type { JsonApiResource } from '@/lib/opportunityApi'
 
 function makeContactResource(attrs: Record<string, unknown> = {}): JsonApiResource {
@@ -101,5 +101,32 @@ describe('mapContactResource', () => {
       makeContactResource({ opportunities_count: undefined })
     )
     expect(contact.opportunitiesCount).toBe(0)
+  })
+})
+
+describe('buildContactListParams', () => {
+  it('envía whatsapp_consent cuando hay filtro de consentimiento', () => {
+    expect(buildContactListParams({ kind: 'person', whatsapp_consent: 'opted_out' })).toEqual({
+      kind: 'person',
+      whatsapp_consent: 'opted_out',
+    })
+  })
+
+  it('omite whatsapp_consent sin filtro', () => {
+    expect(buildContactListParams({ kind: 'person' })).not.toHaveProperty('whatsapp_consent')
+  })
+})
+
+describe('mapContactResource — confirmación de WhatsApp', () => {
+  it('mapea la fuente y la fecha del opt-in confirmado', () => {
+    const contact = mapContactResource(
+      makeContactResource({
+        whatsapp_opted_in: true,
+        whatsapp_opt_in_source: 'reply_confirm',
+        whatsapp_opt_in_at: '2026-09-23T15:00:00Z',
+      }),
+    )
+    expect(contact.whatsappOptInSource).toBe('reply_confirm')
+    expect(contact.whatsappOptInAt).toBe('2026-09-23T15:00:00Z')
   })
 })

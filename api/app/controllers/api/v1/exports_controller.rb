@@ -35,6 +35,14 @@ module Api
                         status: :gone
         end
 
+        record_export_audit!(
+          resource:  @export.resource,
+          format:    @export.format,
+          filters:   @export.filters || {},
+          action:    "export_download",
+          export_id: @export.id
+        )
+
         payload = Exports::Storage.download_payload(@export)
 
         case payload&.dig(:type)
@@ -74,10 +82,11 @@ module Api
         )
         safe_enqueue_export_generation_job(export.id)
         record_export_audit!(
-          resource: export.resource,
-          format:   export.format,
-          filters:  export.filters || {},
-          sync:     false
+          resource:  export.resource,
+          format:    export.format,
+          filters:   export.filters || {},
+          sync:      false,
+          export_id: export.id
         )
 
         render_resource(export, with: ExportSerializer, status: :accepted)

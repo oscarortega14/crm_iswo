@@ -20,6 +20,7 @@ module Api
 
       # GET /api/v1/contacts
       # ?segment=clients|prospects|hot_leads|stale — filtro por métrica rápida
+      # ?whatsapp_consent=confirmed|opted_out|unconfirmed|none — ver Contact.filter_by_whatsapp_consent
       def index
         scope = policy_scope(Contact).kept
 
@@ -35,6 +36,9 @@ module Api
         scope = scope.where(kind: params[:kind])               if params[:kind].present?
         scope = scope.where(owner_user_id: params[:owner_id])  if params[:owner_id].present?
         scope = scope.with_phone if params[:has_phone] == "true"
+        if Contact::WHATSAPP_CONSENT_FILTERS.include?(params[:whatsapp_consent])
+          scope = scope.filter_by_whatsapp_consent(params[:whatsapp_consent])
+        end
 
         if (q = params[:q]).present?
           scope = Contacts::EncryptedSearch.apply(scope, q)
@@ -136,7 +140,7 @@ module Api
         authorize Contact, :destroy?
 
         scope = policy_scope(Contact).kept
-                                      .where(whatsapp_opt_in_at: nil)
+                                      .where(whatsapp_opt_in_at: nil, whatsapp_opt_out_at: nil)
                                       .where(id: current_tenant.whatsapp_messages.inbound.select(:contact_id))
 
         count = scope.count
@@ -157,13 +161,75 @@ module Api
         ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
         return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.blank?
 
-        contacts = policy_scope(Contact).kept.where(id: ids).where(whatsapp_opt_in_at: nil)
+        # Los que dijeron "No" (opt-out) quedan fuera del opt-in en bloque: solo
+        # un "Sí" del propio contacto los vuelve a habilitar.
+        pending = policy_scope(Contact).kept.where(id: ids).where(whatsapp_opt_in_at: nil)
+        contacts = pending.where(whatsapp_opt_out_at: nil)
         marked = contacts.count
         contacts.find_each do |c|
           c.mark_whatsapp_opt_in!(source: "manual")
           audit_contact!("contact.whatsapp_opt_in", c)
         end
+        render json: { data: { marked: marked, skipped_opted_out: pending.count - marked } }, status: :ok
+      end
+
+      # POST /api/v1/contacts/bulk_whatsapp_opt_out — { ids: ["1","2",...] }
+      # Registra a mano que el contacto NO autoriza WhatsApp (lo dijo por
+      # teléfono, email, en persona…). Queda excluido de toda campaña.
+      def bulk_whatsapp_opt_out
+        authorize Contact, :bulk_whatsapp_opt_in?
+        ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+        return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.blank?
+
+        contacts = policy_scope(Contact).kept.where(id: ids).where(whatsapp_opt_out_at: nil)
+        marked = contacts.count
+        contacts.find_each do |c|
+          c.mark_whatsapp_opt_out!(source: "manual")
+          audit_contact!("contact.whatsapp_opt_out", c)
+        end
         render json: { data: { marked: marked } }, status: :ok
+      end
+
+      # GET /api/v1/contacts/origin_options — orígenes con su cantidad de contactos
+      # (p. ej. «Excel: 2026-07-08 Expo Calidad Ecuador.xlsx»), para filtrar campañas.
+      def origin_options
+        authorize Contact, :origin_options?
+        render json: { data: policy_scope(Contact).origin_options }
+      end
+
+      # POST /api/v1/contacts/bulk_email_opt_out — { ids: [...] }
+      # Registra a mano que el contacto no quiere correos de campañas.
+      def bulk_email_opt_out
+        authorize Contact, :bulk_whatsapp_opt_in?
+        ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+        return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.blank?
+
+        contacts = policy_scope(Contact).kept.where(id: ids, email_opt_out_at: nil)
+        marked = contacts.count
+        contacts.find_each do |c|
+          c.mark_email_opt_out!(source: "manual")
+          audit_contact!("contact.email_opt_out", c)
+        end
+        render json: { data: { marked: marked } }, status: :ok
+      end
+
+      # POST /api/v1/contacts/bulk_email_opt_in — { ids: [...] }
+      # Deshace solo las bajas marcadas a mano: quien se dio de baja por el
+      # enlace, rebotó o marcó spam no se reactiva desde el CRM.
+      def bulk_email_opt_in
+        authorize Contact, :bulk_whatsapp_opt_in?
+        ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+        return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.blank?
+
+        opted_out = policy_scope(Contact).kept.where(id: ids).where.not(email_opt_out_at: nil)
+        contacts  = opted_out.where(email_opt_out_source: "manual")
+        total  = opted_out.count
+        marked = contacts.count
+        contacts.find_each do |c|
+          c.clear_email_opt_out!
+          audit_contact!("contact.email_opt_in", c)
+        end
+        render json: { data: { marked: marked, skipped: total - marked } }, status: :ok
       end
 
       # GET /api/v1/contacts/check_duplicates?phone=...&email=...&full_name=...
@@ -212,9 +278,9 @@ module Api
         require "caxlsx"
 
         package = Axlsx::Package.new
-        package.workbook.add_worksheet(name: "Contactos") do |sheet|
-          sheet.add_row %w[first_name last_name email phone company position city country kind notes stage]
-        end
+        add_import_contacts_sheet!(package) # primera hoja: es la que lee el importador
+        add_import_instructions_sheet!(package)
+        add_import_sources_sheet!(package)
         add_import_stages_sheet!(package)
 
         tmp = Tempfile.new(["plantilla_contactos", ".xlsx"], binmode: true)
@@ -298,13 +364,78 @@ module Api
         )
       end
 
+      IMPORT_EXAMPLE_ROWS = [
+        [ "Laura", "Gómez Pérez", "1020304050", "+573001234567", "laura.gomez@correo.com", "Feria ISO 2026" ],
+        [ "Constructora Andina S.A.S.", "", "900123456-7", "+576014567890", "compras@andina.com.co", "Referido" ]
+      ].freeze
+
+      # Hoja «Contactos»: cabeceras en español; Cédula/NIT y Celular con formato
+      # texto (si no, Excel convierte «+573001234567» en 573001234567 y le quita
+      # ceros/guiones al documento). Sin filas vacías: el importador las contaría
+      # como «filas omitidas».
+      def add_import_contacts_sheet!(package)
+        styles = package.workbook.styles
+        header = styles.add_style(b: true, fg_color: "FFFFFF", bg_color: "1E3A5F", alignment: { horizontal: :center })
+        text   = styles.add_style(format_code: "@")
+        headers = Contacts::SpreadsheetImporter::TEMPLATE_HEADERS
+
+        package.workbook.add_worksheet(name: "Contactos") do |sheet|
+          sheet.add_row headers, style: header
+          sheet.column_widths 26, 22, 18, 26, 30, 24
+          headers.each_with_index do |h, i|
+            sheet.column_info[i].style = text if h.start_with?("Celular", "Cédula")
+          end
+          sheet.sheet_view.pane { |pane| pane.top_left_cell = "A2"; pane.state = :frozen; pane.y_split = 1 }
+        end
+      end
+
+      def add_import_instructions_sheet!(package)
+        bold = package.workbook.styles.add_style(b: true)
+        package.workbook.add_worksheet(name: "Instrucciones") do |sheet|
+          sheet.add_row [ "Cómo llenar la hoja «Contactos»" ], style: bold
+          sheet.add_row [ "Una fila por contacto. No cambies los títulos de la primera fila." ]
+          sheet.add_row []
+          sheet.add_row %w[Columna Qué escribir Obligatorio], style: bold
+          sheet.add_row [ "Nombres", "Persona: su(s) nombre(s). Empresa: la razón social completa", "Sí" ]
+          sheet.add_row [ "Apellidos", "Persona: su(s) apellido(s). Empresa: déjalo vacío", "No" ]
+          sheet.add_row [ "Cédula o NIT",
+                          "Cédula → persona natural. NIT → empresa: escríbelo con dígito de verificación " \
+                          "(900123456-7) o con «NIT» adelante. También sirve «CC 1020304050»", "Recomendado" ]
+          sheet.add_row [ "Celular (con indicativo)", "Con indicativo del país: +57 Colombia, +52 México, +51 Perú…", "Recomendado" ]
+          sheet.add_row [ "Correo", "Correo electrónico", "No" ]
+          sheet.add_row [ "Origen del lead",
+                          "De dónde llegó: Feria, Referido, Facebook, Página web… (ver hoja «Fuentes»). " \
+                          "Si no existe se crea como fuente nueva", "Recomendado" ]
+          sheet.add_row []
+          sheet.add_row [ "Opcionales: puedes agregar columnas «Ciudad», «País» o «Etapa» (ver hoja «Etapas»)." ]
+          sheet.add_row []
+          sheet.add_row [ "Ejemplo (una persona y una empresa):" ], style: bold
+          sheet.add_row Contacts::SpreadsheetImporter::TEMPLATE_HEADERS, style: bold
+          IMPORT_EXAMPLE_ROWS.each { |row| sheet.add_row row, types: :string }
+          sheet.column_widths 26, 90, 16
+        end
+      end
+
+      # Hoja de referencia: fuentes de lead del tenant para la columna «Origen del lead».
+      def add_import_sources_sheet!(package)
+        names = current_tenant.lead_sources.active.order(:name).pluck(:name)
+        return if names.empty?
+
+        package.workbook.add_worksheet(name: "Fuentes") do |sheet|
+          sheet.add_row [ "Fuentes de lead existentes (columna «Origen del lead»)" ]
+          sheet.add_row [ "Escríbela igual (sin importar tildes ni mayúsculas). Una nueva se crea sola." ]
+          names.each { |n| sheet.add_row [ n ] }
+          sheet.column_widths 60
+        end
+      end
+
       # Hoja de referencia: valores válidos para la columna `stage` (pipeline por defecto).
       def add_import_stages_sheet!(package)
         pipeline = Contacts::SpreadsheetImporter.default_pipeline(current_tenant)
         return unless pipeline
 
         package.workbook.add_worksheet(name: "Etapas") do |sheet|
-          sheet.add_row ["Etapas válidas para la columna stage — pipeline «#{pipeline.name}»"]
+          sheet.add_row [ "Etapas válidas para la columna «Etapa» — pipeline «#{pipeline.name}»" ]
           sheet.add_row ["Vacía = primera etapa. No distingue mayúsculas ni tildes."]
           pipeline.pipeline_stages.where(discarded_at: nil).order(:position).each do |stage|
             label = if stage.closed_won? then "(cierre ganado)"

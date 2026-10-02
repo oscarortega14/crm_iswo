@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -49,6 +52,7 @@
     "dompurify": "^3.2.4",
     "framer-motion": "^11.15.0",
     "grapesjs": "^0.22.16",
+    "grapesjs-preset-newsletter": "^1.0.2",
     "grapesjs-preset-webpage": "^1.0.3",
     "lucide-react": "^0.564.0",
     "qrcode.react": "^4.2.0",

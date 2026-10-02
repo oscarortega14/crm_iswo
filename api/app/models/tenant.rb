@@ -26,6 +26,9 @@ class Tenant < ApplicationRecord
   has_many :whatsapp_messages,      dependent: :destroy
   has_many :whatsapp_templates,     dependent: :destroy
   has_many :whatsapp_campaigns,     dependent: :destroy
+  has_many :email_campaigns,        dependent: :destroy
+  has_many :ai_agent_runs,          dependent: :delete_all
+  has_many :appointments,           dependent: :destroy
   has_many :exports,                dependent: :destroy
   has_many :audit_events,           dependent: :nullify
   has_one  :bant_criterion,         dependent: :destroy
@@ -50,15 +53,9 @@ class Tenant < ApplicationRecord
   # ---- Scopes ---------------------------------------------------------------
   scope :active, -> { kept.where(active: true) }
 
-  # Integración Twilio: preferimos `active`; si la cuenta quedó en `error` (p. ej. tras «Probar conexión»
+  # Preferimos `active`; si la cuenta quedó en `error` (p. ej. tras «Probar conexión»
   # fallida), seguimos usando la misma fila para remitente y credenciales hasta que el usuario corrija.
   # Usamos `AdIntegration.unscoped` + `tenant_id` para no depender de ActsAsTenant.current (jobs, consola, specs).
-  def preferred_twilio_integration
-    base = AdIntegration.unscoped.where(tenant_id: id, provider: :twilio)
-    base.where(status: "active").order(updated_at: :desc).first ||
-      base.order(updated_at: :desc).first
-  end
-
   def preferred_whatsapp_cloud_integration
     base = AdIntegration.unscoped.where(tenant_id: id, provider: :whatsapp_cloud)
     base.where(status: "active").order(updated_at: :desc).first ||
@@ -71,12 +68,10 @@ class Tenant < ApplicationRecord
       base.order(updated_at: :desc).first
   end
 
-  # Número/línea usado como remitente en mensajes WhatsApp salientes (Twilio API).
-  # Orden: settings del tenant → ENV → integración Twilio (`account_identifier`).
+  # Número/línea usado como remitente en mensajes WhatsApp salientes (fallback genérico
+  # cuando `whatsapp_outbound_from_number_for` no reconoce el provider).
   def whatsapp_outbound_from_number
-    settings.dig("whatsapp", "number").presence ||
-      ENV["TWILIO_WHATSAPP_NUMBER"].presence ||
-      preferred_twilio_integration&.account_identifier.presence
+    settings.dig("whatsapp", "number").presence
   end
 
   # Etiqueta para `from_number` cuando el proveedor es Cloud API (Meta no usa el campo en el POST).
@@ -85,28 +80,25 @@ class Tenant < ApplicationRecord
       preferred_whatsapp_cloud_integration&.account_identifier.presence
   end
 
-  # Twilio vs WhatsApp Cloud API vs OpenWA para mensajes salientes.
+  # WhatsApp Cloud API vs OpenWA para mensajes salientes.
   # Prioridad: ENV["WHATSAPP_PROVIDER"] → settings["whatsapp"]["provider"] →
-  # si hay credenciales, preferimos Cloud > Twilio > OpenWA.
+  # si hay credenciales, preferimos Cloud > OpenWA.
   def whatsapp_outbound_provider
     exp = ENV["WHATSAPP_PROVIDER"].to_s.strip
-    return exp if %w[twilio whatsapp_cloud openwa].include?(exp)
+    return exp if %w[whatsapp_cloud openwa].include?(exp)
 
     override = settings.dig("whatsapp", "provider").to_s.strip
-    return override if %w[twilio whatsapp_cloud openwa].include?(override)
+    return override if %w[whatsapp_cloud openwa].include?(override)
 
     cloud_i   = preferred_whatsapp_cloud_integration
-    twilio_i  = preferred_twilio_integration
     openwa_i  = preferred_openwa_integration
     cloud_ok  = ad_integration_has_credentials?(cloud_i)
-    twilio_ok = ad_integration_has_credentials?(twilio_i)
     openwa_ok = ad_integration_has_credentials?(openwa_i)
 
     return "whatsapp_cloud" if cloud_ok
-    return "twilio"         if twilio_ok
     return "openwa"         if openwa_ok
 
-    "twilio"
+    "whatsapp_cloud"
   end
 
   def whatsapp_outbound_from_number_for(provider)
@@ -132,6 +124,16 @@ class Tenant < ApplicationRecord
                    settings.dig("whatsapp", "cloud_phone_number_id").present?
 
     ad_integration_has_credentials?(preferred_whatsapp_cloud_integration)
+  end
+
+  # Asistente IA de WhatsApp (settings["ai_agent"]).
+  def ai_agent_config
+    AiAgent::Config.new(self)
+  end
+
+  # Remitente de campañas de correo (dominio propio verificado en SES).
+  def email_sender
+    EmailMarketing::Sender.new(self)
   end
 
   private
