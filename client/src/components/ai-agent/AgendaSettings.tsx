@@ -41,7 +41,9 @@ const DURATIONS = [15, 30, 45, 60, 90, 120]
 export function AgendaSettings({ config, canEdit }: { config: AiAgentConfig; canEdit: boolean }) {
   const queryClient = useQueryClient()
   const [form, setForm] = useState<AiCalendarSettings>(config.calendar)
-  useEffect(() => setForm(config.calendar), [config.calendar])
+  useEffect(() => {
+    setForm(config.calendar)
+  }, [config.calendar])
   const set = <K extends keyof AiCalendarSettings>(k: K, v: AiCalendarSettings[K]) => setForm((f) => ({ ...f, [k]: v }))
   const dirty = JSON.stringify(form) !== JSON.stringify(config.calendar)
 

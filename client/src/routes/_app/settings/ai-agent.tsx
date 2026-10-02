@@ -110,7 +110,9 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
     handoff_rules: c.handoffRules,
   })
   const [form, setForm] = useState<AiAgentInput>(() => toForm(config))
-  useEffect(() => setForm(toForm(config)), [config])
+  useEffect(() => {
+    setForm(toForm(config))
+  }, [config])
 
   const set = <K extends keyof AiAgentInput>(key: K, value: AiAgentInput[K]) => setForm((f) => ({ ...f, [key]: value }))
 
@@ -390,7 +392,9 @@ function TestChat({ disabled }: { disabled: boolean }) {
     onError: (err) => toast.error(formatRailsError(err, 'El asistente no pudo responder')),
   })
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [turns, testMutation.isPending])
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' })
+  }, [turns, testMutation.isPending])
 
   const send = () => {
     const text = draft.trim()
