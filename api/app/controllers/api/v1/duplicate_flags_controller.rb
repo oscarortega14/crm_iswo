@@ -59,17 +59,41 @@ module Api
       # distintos, también los contactos: queda uno solo con todos sus orígenes.
       def merge
         authorize @flag, :update?
-        source = @flag.opportunity
-        target = @flag.duplicate_of_opportunity
-        ActiveRecord::Base.transaction do
-          Opportunities::Merger.new(source: source, target: target, performed_by: current_user).call
-          if source.contact_id != target.contact_id
-            Contacts::Merger.call(survivor: target.contact, absorbed: source.contact, performed_by: current_user)
-          end
-          @flag.resolve!(as: "merged", by: current_user, note: params[:note])
-        end
+        DuplicateFlags::Merge.call(flag: @flag, by: current_user, note: params[:note])
         audit_duplicate_flag!("duplicate.merge", @flag)
         render_no_content
+      end
+
+      BULK_LIMIT = 500
+
+      # POST /api/v1/duplicate_flags/bulk_merge — { ids: [...] } o { all: true }
+      # Fusión masiva: misma lógica que #merge, una alerta a la vez (cada una en
+      # su transacción). Las que ya no aplican (una oportunidad se cerró o se
+      # fusionó en una alerta anterior del mismo lote) se omiten con su motivo.
+      def bulk_merge
+        authorize DuplicateFlag, :merge?
+        scope = policy_scope(DuplicateFlag).resolution_pending
+        unless ActiveModel::Type::Boolean.new.cast(params[:all])
+          ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+          return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.empty?
+
+          scope = scope.where(id: ids)
+        end
+
+        merged = 0
+        skipped = []
+        scope.order(:created_at).limit(BULK_LIMIT).pluck(:id).each do |id|
+          flag = DuplicateFlag.actionable.find_by(id: id)
+          next skipped << { id: id.to_s, reason: "ya no aplica (oportunidad cerrada o ya fusionada)" } unless flag
+
+          DuplicateFlags::Merge.call(flag: flag, by: current_user, note: "Fusión masiva")
+          audit_duplicate_flag!("duplicate.merge", flag, bulk: true)
+          merged += 1
+        rescue ActiveRecord::RecordInvalid, ArgumentError => e
+          skipped << { id: id.to_s, reason: e.message.truncate(160) }
+        end
+
+        render json: { data: { merged: merged, skipped: skipped } }, status: :ok
       end
 
       # POST /api/v1/duplicate_flags/:id/ignore

@@ -13,7 +13,10 @@ import {
   ScanSearch,
   ExternalLink,
   Clock,
+  Layers,
+  X,
 } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -37,6 +40,7 @@ import {
   ignoreDuplicateFlag,
   matchedOnLabel,
   mergeDuplicateFlag,
+  bulkMergeDuplicateFlags,
   reassignDuplicateFlag,
   scanDuplicateFlags,
   type ContactLite,
@@ -145,6 +149,16 @@ function DuplicatesPage() {
   const [ignoreConfirmFlag, setIgnoreConfirmFlag] = useState<DuplicateFlagRow | null>(null)
   const [reassignFlag, setReassignFlag] = useState<DuplicateFlagRow | null>(null)
   const [reassignUserId, setReassignUserId] = useState('')
+  /** Alertas marcadas para fusión masiva. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState<'all' | 'selected' | null>(null)
+  const toggleSelected = (id: string, on: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(id)
+      else next.delete(id)
+      return next
+    })
 
   const openOpportunity = (id: string) => {
     void navigate({ to: '/opportunities', search: { selected: id } })
@@ -209,6 +223,20 @@ function DuplicatesPage() {
     mutationFn: mergeDuplicateFlag,
     onSuccess: () => { invalidate(); toast.success('Duplicados fusionados: queda una sola oportunidad y un solo contacto'); setMergeConfirmFlag(null) },
     onError: (err: unknown) => toast.error(formatRailsError(err, 'No se pudo fusionar')),
+  })
+
+  const bulkMergeMutation = useMutation({
+    mutationFn: (mode: 'all' | 'selected') =>
+      bulkMergeDuplicateFlags(mode === 'all' ? { all: true } : { ids: Array.from(selectedIds) }),
+    onSuccess: ({ merged, skipped }) => {
+      invalidate()
+      setSelectedIds(new Set())
+      setBulkConfirm(null)
+      toast.success(
+        `${merged} duplicado(s) fusionado(s)${skipped.length > 0 ? ` · ${skipped.length} omitido(s) porque ya no aplicaban` : ''}`,
+      )
+    },
+    onError: (err: unknown) => toast.error(formatRailsError(err, 'No se pudo hacer la fusión masiva')),
   })
 
   const ignoreMutation = useMutation({
@@ -297,6 +325,12 @@ function DuplicatesPage() {
             <SelectItem value="all">Todos los estados</SelectItem>
           </SelectContent>
         </Select>
+        {canResolve && pendingTotal > 0 && (
+          <Button size="sm" onClick={() => setBulkConfirm('all')} disabled={bulkMergeMutation.isPending}>
+            <Layers className="mr-2 h-4 w-4" />
+            Fusionar todos ({pendingTotal})
+          </Button>
+        )}
         {canResolve && (
           <Button
             variant="outline"
@@ -407,12 +441,47 @@ function DuplicatesPage() {
         </Card>
       ) : (
         <>
+          {canResolve && flags.some((f) => f.pending) && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={flags.filter((f) => f.pending).every((f) => selectedIds.has(f.id))}
+                  onCheckedChange={(v) =>
+                    flags.filter((f) => f.pending).forEach((f) => toggleSelected(f.id, v === true))
+                  }
+                  aria-label="Seleccionar los de esta página"
+                />
+                Seleccionar los de esta página
+              </label>
+              {selectedIds.size > 0 && (
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">{selectedIds.size} seleccionado(s)</span>
+                  <Button size="sm" onClick={() => setBulkConfirm('selected')} disabled={bulkMergeMutation.isPending}>
+                    <Merge className="mr-2 h-4 w-4" />
+                    Fusionar seleccionados
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    <X className="mr-1 h-4 w-4" />
+                    Limpiar
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="space-y-4">
             {flags.map((flag) => (
-              <Card key={flag.id}>
+              <Card key={flag.id} className={selectedIds.has(flag.id) ? 'ring-2 ring-primary/60' : undefined}>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex items-start gap-3">
+                      {flag.pending && canResolve && (
+                        <Checkbox
+                          className="mt-2"
+                          checked={selectedIds.has(flag.id)}
+                          onCheckedChange={(v) => toggleSelected(flag.id, v === true)}
+                          aria-label="Seleccionar para fusión masiva"
+                        />
+                      )}
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950">
                         <AlertTriangle className="h-4 w-4 text-amber-600" />
                       </div>
@@ -518,6 +587,31 @@ function DuplicatesPage() {
           )}
         </>
       )}
+
+      <Dialog open={bulkConfirm !== null} onOpenChange={(o) => { if (!o && !bulkMergeMutation.isPending) setBulkConfirm(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {bulkConfirm === 'all' ? `¿Fusionar los ${pendingTotal} duplicados pendientes?` : `¿Fusionar ${selectedIds.size} duplicado(s)?`}
+            </DialogTitle>
+            <DialogDescription>
+              En cada alerta, la oportunidad detectada se consolida en la existente y, si son contactos distintos, se
+              unen en uno solo con sus datos, conversaciones y todos sus orígenes. Las que ya no aplican (oportunidad
+              cerrada o ya fusionada) se omiten. Esta acción no se puede deshacer desde aquí.
+              {bulkConfirm === 'all' && pendingTotal > 500 ? ' Se fusionan hasta 500 por vez: repite para el resto.' : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkConfirm(null)} disabled={bulkMergeMutation.isPending}>
+              Cancelar
+            </Button>
+            <Button onClick={() => bulkConfirm && bulkMergeMutation.mutate(bulkConfirm)} disabled={bulkMergeMutation.isPending}>
+              {bulkMergeMutation.isPending && <Spinner className="mr-2" />}
+              Fusionar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!mergeConfirmFlag} onOpenChange={(o) => !o && setMergeConfirmFlag(null)}>
         <DialogContent>

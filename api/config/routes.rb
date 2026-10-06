@@ -160,6 +160,7 @@ Rails.application.routes.draw do
         collection do
           get :stats
           post :scan
+          post :bulk_merge # { ids: [...] } o { all: true } — fusión masiva (admin/manager)
         end
         member do
           post :reassign
