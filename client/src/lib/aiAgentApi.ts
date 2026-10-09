@@ -24,6 +24,9 @@ export interface AiAgentConfig {
   openaiConfigured: boolean
   model: string
   defaults: { tone: string; qualification: string; handoff_rules: string }
+  /** Responsable de las oportunidades que abre el asistente para leads sin dueño. */
+  defaultOwnerId: string | null
+  defaultOwnerName: string | null
   /** Chats donde el asistente está en pausa (los atiende un asesor). */
   pausedChats: number
   /** Chats donde un asesor escribió en los últimos 7 días. */
@@ -74,6 +77,8 @@ function mapConfig(d: Record<string, unknown>): AiAgentConfig {
     openaiConfigured: d.openai_configured === true,
     model: String(d.model ?? ''),
     defaults: (d.defaults ?? { tone: '', qualification: '', handoff_rules: '' }) as AiAgentConfig['defaults'],
+    defaultOwnerId: d.default_owner_id != null ? String(d.default_owner_id) : null,
+    defaultOwnerName: d.default_owner_name != null ? String(d.default_owner_name) : null,
     pausedChats: Number(d.paused_chats ?? 0),
     humanChats: Number(d.human_chats ?? 0),
     calendar: d.calendar as AiCalendarSettings,
@@ -91,6 +96,7 @@ export async function fetchAiAgentConfig(): Promise<AiAgentConfig> {
 
 export type AiAgentInput = {
   enabled: boolean
+  default_owner_id: string | null
   assistant_name: string
   business_info: string
   faq: string

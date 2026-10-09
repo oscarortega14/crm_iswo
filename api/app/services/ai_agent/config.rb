@@ -62,6 +62,13 @@ module AiAgent
     def active? = enabled? && business_info.present? && OpenaiClient.configured?
 
     def assistant_name = raw["assistant_name"].presence || "Asistente de #{tenant.name}"
+
+    # Responsable de las oportunidades que abre el asistente para contactos sin
+    # dueño (leads nuevos de WhatsApp). Sin elegir: el primer administrador activo.
+    def default_owner
+      staff = tenant.users.kept.where(active: true, role: %w[admin manager consultant])
+      staff.find_by(id: raw["default_owner_id"]) || staff.where(role: "admin").order(:id).first
+    end
     def business_info  = raw["business_info"].to_s.strip
     def faq            = raw["faq"].to_s.strip
     def tone           = raw["tone"].presence || DEFAULTS["tone"]
@@ -88,6 +95,14 @@ module AiAgent
     def update!(attrs)
       attrs = attrs.to_h.stringify_keys
       next_config = raw.dup
+      if attrs.key?("default_owner_id")
+        id = attrs["default_owner_id"].presence
+        if id && !tenant.users.kept.where(active: true, role: %w[admin manager consultant]).exists?(id: id)
+          raise ArgumentError, "El asesor por defecto no existe o no está activo."
+        end
+
+        next_config["default_owner_id"] = id&.to_s
+      end
       next_config["calendar"] = normalize_calendar(attrs["calendar"]) if attrs.key?("calendar")
       next_config["reminders"] = normalize_reminders(attrs["reminders"]) if attrs.key?("reminders")
       next_config["enabled"] = ActiveModel::Type::Boolean.new.cast(attrs["enabled"]) == true if attrs.key?("enabled")
@@ -171,6 +186,7 @@ module AiAgent
         "business_info" => business_info, "faq" => faq, "tone" => tone, "qualification" => qualification,
         "handoff_rules" => handoff_rules, "openai_configured" => OpenaiClient.configured?,
         "model" => OpenaiClient.model_name, "defaults" => DEFAULTS,
+        "default_owner_id" => raw["default_owner_id"], "default_owner_name" => default_owner&.name,
         "paused_chats" => paused_chats.count, "human_chats" => human_chats.count,
         "calendar" => calendar, "calendar_active" => calendar_active?, "reminders" => reminders,
         "google_configured" => GoogleCalendar.configured?,

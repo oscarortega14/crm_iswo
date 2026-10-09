@@ -78,6 +78,28 @@ RSpec.describe AiAgent::Responder do
     expect(client.requests.last[:messages].last).to include(role: "tool")
   end
 
+  it "un contacto nuevo de WhatsApp sin oportunidad: al calificarlo se abre una a nombre del asesor por defecto" do
+    seller = create(:user, :consultant, tenant: tenant, name: "Paula Ríos")
+    tenant.ai_agent_config.update!(default_owner_id: seller.id)
+    create(:lead_source, tenant: tenant, name: "WhatsApp", kind: "whatsapp")
+    newcomer = create(:contact, tenant: tenant, first_name: "Contacto", last_name: "9911", phone_e164: "+593990009911",
+                                owner_user: nil, source_kind: "whatsapp", source_label: "inbound")
+    msg = create(:whatsapp_message, :inbound, tenant: tenant, contact: newcomer, body: "Necesito la ISO 9001 ya",
+                                              from_number: "+593990009911", to_number: "+5731999999999")
+    client = FakeOpenaiClient.new(
+      { tool_calls: [ { name: "calificar_lead", arguments: { temperatura: "hot", resumen: "Urgente ISO 9001" } } ] },
+      { content: "¡Claro! ¿Para cuántas personas?" }
+    )
+
+    described_class.call(message: msg, client: client)
+
+    opp = newcomer.opportunities.kept.open.first
+    expect(opp).to have_attributes(owner_user_id: seller.id, temperature: "hot")
+    expect(opp.lead_source.kind).to eq("whatsapp")
+    expect(opp.opportunity_logs.find_by(action: "create").changes_data["origin"]).to eq("ai_agent")
+    expect(Notification.where(user: seller, kind: "ai_agent_hot_lead").count).to eq(1)
+  end
+
   it "pasar_a_asesor pausa el chat, avisa y responde aunque el modelo no escriba texto" do
     msg = inbound("Quiero hablar con una persona")
     client = FakeOpenaiClient.new({ tool_calls: [ { name: "pasar_a_asesor", arguments: { motivo: "Lo pidió" } } ] },

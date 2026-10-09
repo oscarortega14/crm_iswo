@@ -24,7 +24,7 @@ module Api
       def update
         authorize :ai_agent, :update?
         attrs = params.require(:ai_agent).permit(
-          :enabled, *AiAgent::Config::TEXT_FIELDS,
+          :enabled, :default_owner_id, *AiAgent::Config::TEXT_FIELDS,
           calendar: [ :calendar_id, :duration_minutes, :start_time, :end_time, :min_notice_hours, :max_days_ahead,
                       :location, { work_days: [] } ],
           reminders: [ :whatsapp_template_id, :no_show_template_id, :email_enabled, :staff_offset_minutes,

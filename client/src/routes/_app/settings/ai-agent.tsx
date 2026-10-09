@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { fetchUsersList } from '@/lib/userApi'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -48,6 +50,8 @@ export const Route = createFileRoute('/_app/settings/ai-agent')({
   beforeLoad: () => requireSettingsRole('admin', 'manager'),
   component: AiAgentSettingsPage,
 })
+
+const NO_OWNER = '__auto__'
 
 const BUSINESS_PLACEHOLDER = `Ej:
 ISWO es una consultora de sistemas de gestión en Bogotá (Colombia) y Quito (Ecuador).
@@ -103,6 +107,7 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
   const queryClient = useQueryClient()
   const toForm = (c: AiAgentConfig): AiAgentInput => ({
     enabled: c.enabled,
+    default_owner_id: c.defaultOwnerId,
     assistant_name: c.assistantName,
     business_info: c.businessInfo,
     faq: c.faq,
@@ -111,6 +116,12 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
     handoff_rules: c.handoffRules,
   })
   const [form, setForm] = useState<AiAgentInput>(() => toForm(config))
+  const { data: users = [] } = useQuery({
+    queryKey: ['users', 'for-ai-agent-owner'],
+    queryFn: () => fetchUsersList({ items: 200 }),
+    enabled: canEdit,
+  })
+  const staff = users.filter((u) => ['admin', 'manager', 'consultant'].includes(String(u.role)))
   useEffect(() => {
     setForm(toForm(config))
   }, [config])
@@ -194,6 +205,26 @@ function ConfigForm({ config, canEdit }: { config: AiAgentConfig; canEdit: boole
             placeholder="Ej: Sofía, asistente de ISWO"
             disabled={!canEdit}
           />
+        </Field>
+        <Field
+          label="Asesor por defecto"
+          hint={`Cuando el asistente califica o agenda a un contacto nuevo sin dueño, le abre una oportunidad a nombre de esta persona.${
+            !form.default_owner_id && config.defaultOwnerName ? ` Sin elegir: ${config.defaultOwnerName} (primer administrador).` : ''
+          }`}
+        >
+          <Select
+            value={form.default_owner_id ?? NO_OWNER}
+            onValueChange={(v) => set('default_owner_id', v === NO_OWNER ? null : v)}
+            disabled={!canEdit}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_OWNER}>Primer administrador (automático)</SelectItem>
+              {staff.map((u) => (
+                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
         <Field
           label="Información del negocio"

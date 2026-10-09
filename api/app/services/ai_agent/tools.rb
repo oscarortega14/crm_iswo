@@ -165,7 +165,7 @@ module AiAgent
       temperature = args["temperatura"].to_s
       return "Temperatura inválida" unless TEMPERATURES.include?(temperature)
       return "Calificado como #{temperature} (prueba)" if @dry_run
-      return "Sin oportunidad abierta para calificar" unless @opportunity
+      return "Sin oportunidad abierta para calificar" unless ensure_opportunity!
 
       previous = @opportunity.temperature
       # La calificación del asistente manda sobre el recálculo por reglas (BANT).
@@ -241,6 +241,7 @@ module AiAgent
       return "Ya tiene una cita el #{@scheduler.label(upcoming.starts_at)}; usa reprogramar_cita si quiere cambiarla." if upcoming
       return "Cita agendada (prueba) para #{args['inicio']}" if @dry_run
 
+      ensure_opportunity!
       appointment = @scheduler.book!(contact: @contact, opportunity: @opportunity, starts_at: args["inicio"],
                                      reason: args["motivo"])
       "Cita agendada: #{@scheduler.label(appointment.starts_at)}. Confírmale al cliente la fecha y hora."
@@ -268,6 +269,22 @@ module AiAgent
       return nil if @contact.new_record?
 
       @upcoming ||= @contact.appointments.upcoming.first
+    end
+
+    # Un contacto nuevo de WhatsApp no tiene oportunidad: al calificarlo o
+    # agendarle, el asistente la abre (pipeline por defecto, fuente WhatsApp) a
+    # nombre del dueño del contacto o del «asesor por defecto» del asistente.
+    def ensure_opportunity!
+      return @opportunity if @opportunity
+
+      tenant = @contact.tenant
+      owner = @contact.owner_user || tenant.ai_agent_config.default_owner
+      return nil unless owner
+
+      source = tenant.lead_sources.active.find_by(kind: "whatsapp")
+      @opportunity = Contacts::ProspectOpportunityCreator.call(contact: @contact, actor: owner, origin: "ai_agent",
+                                                               lead_source: source)
+      @opportunity ||= @contact.opportunities.kept.open.order(last_activity_at: :desc).first
     end
 
     def notify_hot_lead(summary)
