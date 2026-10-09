@@ -69,7 +69,7 @@ class LandingSubmissionProcessor
     ).call
 
     if matches.any?
-      matches.first.contact
+      matches.first.contact.tap { |c| c.record_origin!("web", @landing&.title.presence || @landing&.slug) }
     else
       @tenant.contacts.create!(
         first_name:    first_name,

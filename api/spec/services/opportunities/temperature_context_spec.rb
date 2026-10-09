@@ -36,7 +36,7 @@ RSpec.describe Opportunities::TemperatureContext do
     ctx = described_class.new(opp)
     labels = ctx.signals.map(&:label)
 
-    expect(labels).to include("Nombre", "Correo", "Empresa", "Ciudad")
+    expect(labels).to include("Nombre", "Empresa", "Ciudad")
     expect(labels).to include("Etapa", "Valor estimado", "Notas")
     expect(labels).to include("Tipo de crédito", "Empleador")
     expect(labels).to include("Puntuación total")
@@ -47,6 +47,22 @@ RSpec.describe Opportunities::TemperatureContext do
     expect(ctx.data_considered).to all(include(:group, :label, :value))
     expect(ctx.prompt_text).to include("Dossier del lead")
     expect(ctx.prompt_text).to include("Ana")
+  end
+
+  it "no envía correo, teléfono ni documento a la IA (tampoco desde landing o campos custom)" do
+    contact.update!(phone_e164: "+573001234567", document_id: "1020304050",
+                    custom_fields: { "empleador" => "GovCo", "telefono_alterno" => "3109998877" })
+    opp.update_columns(custom_fields: opp.custom_fields.merge(
+      "landing_submission" => { "payload" => { "email" => "otra@correo.com", "celular" => "3112223344",
+                                               "cedula" => "99887766", "ciudad" => "Cali" } }
+    ))
+    ctx = described_class.new(opp.reload)
+
+    text = ctx.prompt_text
+    %w[ana@empresa.com otra@correo.com 3001234567 3109998877 3112223344 1020304050 99887766].each do |pii|
+      expect(text).not_to include(pii)
+    end
+    expect(text).to include("Cali", "GovCo")
   end
 
   it "tolera campos vacíos sin nil en signals" do

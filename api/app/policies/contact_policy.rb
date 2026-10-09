@@ -22,6 +22,8 @@ class ContactPolicy < ApplicationPolicy
   def bulk_whatsapp_opt_in? = manager_or_admin?
   def check_duplicates? = admin? || manager? || consultant?
   def export?           = manager_or_admin?
+  # Lista de orígenes (archivos importados, landings…) para filtrar campañas.
+  def origin_options?   = manager_or_admin?
   # Reclamar un contacto sin dueño (botón "Tomar lead" en el inbox).
   def claim?             = (admin? || manager? || consultant?) && record.owner_user_id.nil?
   # Responder por WhatsApp desde el inbox sin abrir una oportunidad: dueño del

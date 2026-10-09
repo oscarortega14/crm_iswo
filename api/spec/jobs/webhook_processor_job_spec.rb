@@ -3,136 +3,6 @@
 require "rails_helper"
 
 RSpec.describe WebhookProcessorJob, type: :job do
-  describe "whatsapp_twilio" do
-    let(:tenant) { ActsAsTenant.current_tenant }
-    let(:contact) { create(:contact, tenant: tenant) }
-
-    it "actualiza el estado del mensaje saliente con el callback de Twilio" do
-      msg = create(
-        :whatsapp_message,
-        tenant: tenant,
-        contact: contact,
-        direction: :out,
-        provider_message_id: "SMstatus1",
-        status: "queued",
-        sent_at: nil,
-        delivered_at: nil
-      )
-
-      payload = {
-        "MessageSid" => "SMstatus1",
-        "MessageStatus" => "delivered",
-        "SmsStatus" => "delivered"
-      }
-
-      described_class.new.perform("whatsapp_twilio", payload)
-
-      expect(msg.reload.status).to eq("delivered")
-      expect(msg.delivered_at).to be_present
-    end
-
-    it "registra fallo cuando Twilio devuelve undelivered" do
-      msg = create(
-        :whatsapp_message,
-        tenant: tenant,
-        contact: contact,
-        direction: :out,
-        provider_message_id: "SMbad",
-        status: "sent"
-      )
-
-      payload = {
-        "MessageSid" => "SMbad",
-        "MessageStatus" => "undelivered",
-        "SmsStatus" => "undelivered",
-        "ErrorCode" => "63016",
-        "ErrorMessage" => "Template mismatch"
-      }
-
-      described_class.new.perform("whatsapp_twilio", payload)
-
-      msg.reload
-      expect(msg.status).to eq("failed")
-      expect(msg.error_message).to match(/63016|Template mismatch/)
-    end
-
-    context "mensaje entrante", :without_tenant do
-      it "persiste inbound con estado delivered e integración Twilio" do
-        t = create(:tenant)
-        ActsAsTenant.with_tenant(t) do
-          create(
-            :ad_integration,
-            :twilio,
-            tenant: t,
-            account_identifier: "+15559876543"
-          )
-        end
-        payload = {
-          "From" => "whatsapp:+573001234567",
-          "To" => "whatsapp:+15559876543",
-          "Body" => "hola equipo",
-          "MessageSid" => "SMin1"
-        }
-
-        described_class.new.perform("whatsapp_twilio", payload)
-
-        inbound = ActsAsTenant.with_tenant(t) do
-          WhatsappMessage.find_by(provider_message_id: "SMin1")
-        end
-
-        expect(inbound).to be_present
-        expect(inbound.status).to eq("delivered")
-        expect(inbound.direction).to eq("in")
-      end
-
-      it "empareja tenant aunque account_identifier no tenga el +" do
-        t = create(:tenant)
-        ActsAsTenant.with_tenant(t) do
-          create(
-            :ad_integration,
-            :twilio,
-            tenant: t,
-            account_identifier: "15559876543"
-          )
-        end
-        payload = {
-          "From" => "whatsapp:+573001234567",
-          "To" => "whatsapp:+15559876543",
-          "Body" => "hola sin plus",
-          "MessageSid" => "SMinDigits"
-        }
-
-        described_class.new.perform("whatsapp_twilio", payload)
-
-        inbound = ActsAsTenant.with_tenant(t) do
-          WhatsappMessage.find_by(provider_message_id: "SMinDigits")
-        end
-        expect(inbound).to be_present
-        expect(inbound.body).to eq("hola sin plus")
-      end
-
-      it "notifica a admin/manager cuando el contacto creado no tiene dueño (bandeja sin asignar)" do
-        t = create(:tenant)
-        admin = ActsAsTenant.with_tenant(t) do
-          create(:ad_integration, :twilio, tenant: t, account_identifier: "+15559876543")
-          create(:user, :admin, tenant: t)
-        end
-        payload = {
-          "From" => "whatsapp:+573001234567",
-          "To" => "whatsapp:+15559876543",
-          "Body" => "hola nuevo lead",
-          "MessageSid" => "SMnotif1"
-        }
-
-        described_class.new.perform("whatsapp_twilio", payload)
-
-        notif = ActsAsTenant.with_tenant(t) { Notification.find_by(kind: "whatsapp_message_received") }
-        expect(notif).to be_present
-        expect(notif.user_id).to eq(admin.id)
-      end
-    end
-  end
-
   describe "whatsapp_cloud" do
     let(:tenant) { ActsAsTenant.current_tenant }
     let(:contact) { create(:contact, tenant: tenant) }
@@ -247,16 +117,16 @@ RSpec.describe WebhookProcessorJob, type: :job do
         end
 
         payload = {
-          "entry" => [{
-            "changes" => [{
+          "entry" => [ {
+            "changes" => [ {
               "value" => {
                 "metadata" => { "display_phone_number" => "15551797781", "phone_number_id" => "7794189252778687" },
-                "contacts" => [{ "profile" => { "name" => "Jessica" }, "wa_id" => "17863559966" }],
-                "messages" => [{ "from" => "17863559966", "id" => "wamid.notif1",
-                                  "timestamp" => "1758254144", "text" => { "body" => "Hola" }, "type" => "text" }]
+                "contacts" => [ { "profile" => { "name" => "Jessica" }, "wa_id" => "17863559966" } ],
+                "messages" => [ { "from" => "17863559966", "id" => "wamid.notif1",
+                                  "timestamp" => "1758254144", "text" => { "body" => "Hola" }, "type" => "text" } ]
               }
-            }]
-          }]
+            } ]
+          } ]
         }
 
         described_class.new.perform("whatsapp_cloud", payload)
@@ -264,6 +134,38 @@ RSpec.describe WebhookProcessorJob, type: :job do
         notif = ActsAsTenant.with_tenant(t) { Notification.find_by(kind: "whatsapp_message_received") }
         expect(notif).to be_present
         expect(notif.user_id).to eq(owner.id)
+      end
+
+      it "si el contacto de ese número estaba eliminado, lo restaura y le cuelga el mensaje" do
+        t = create(:tenant)
+        deleted = ActsAsTenant.with_tenant(t) do
+          create(:ad_integration, :cloud, tenant: t, account_identifier: "7794189252778687")
+          c = create(:contact, tenant: t, first_name: "Lucio", phone_e164: "+17863559966")
+          c.discard
+          c
+        end
+
+        payload = {
+          "entry" => [ {
+            "changes" => [ {
+              "value" => {
+                "metadata" => { "display_phone_number" => "15551797781", "phone_number_id" => "7794189252778687" },
+                "contacts" => [ { "profile" => { "name" => "Lucio P" }, "wa_id" => "17863559966" } ],
+                "messages" => [ { "from" => "17863559966", "id" => "wamid.volvio1",
+                                  "timestamp" => "1758254144", "text" => { "body" => "Hola otra vez" }, "type" => "text" } ]
+              }
+            } ]
+          } ]
+        }
+
+        expect { described_class.new.perform("whatsapp_cloud", payload) }
+          .not_to(change { ActsAsTenant.with_tenant(t) { Contact.with_discarded.count } })
+
+        ActsAsTenant.with_tenant(t) do
+          inbound = WhatsappMessage.find_by(provider_message_id: "wamid.volvio1")
+          expect(inbound.contact_id).to eq(deleted.id)
+          expect(deleted.reload).to be_kept
+        end
       end
     end
   end

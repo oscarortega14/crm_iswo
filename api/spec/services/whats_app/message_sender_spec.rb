@@ -6,28 +6,28 @@ RSpec.describe WhatsApp::MessageSender do
   let(:tenant) { ActsAsTenant.current_tenant }
   let(:contact) { create(:contact, tenant: tenant) }
   let(:message) do
-    create(:whatsapp_message, :outbound, :twilio,
+    create(:whatsapp_message, :outbound, :cloud,
            tenant: tenant, contact: contact, status: "queued", to_number: "+573001112233")
   end
 
   describe "#deliver" do
-    let(:adapter) { instance_double("WhatsApp::Adapters::Twilio") }
+    let(:adapter) { instance_double("WhatsApp::Adapters::Cloud") }
 
     before do
-      allow(WhatsApp::Adapters::Twilio).to receive(:new).with(tenant: tenant).and_return(adapter)
+      allow(WhatsApp::Adapters::Cloud).to receive(:new).with(tenant: tenant).and_return(adapter)
     end
 
     context "cuando el adapter responde OK" do
       before do
         allow(adapter).to receive(:deliver)
           .with(message)
-          .and_return(provider_message_id: "SMabc123", status: "sent")
+          .and_return(provider_message_id: "wamid.abc123", status: "sent")
       end
 
       it "persiste provider_message_id, status y sent_at" do
         expect(described_class.new(message).deliver).to be(true)
         message.reload
-        expect(message.provider_message_id).to eq("SMabc123")
+        expect(message.provider_message_id).to eq("wamid.abc123")
         expect(message.status).to eq("sent")
         expect(message.sent_at).to be_present
       end

@@ -27,6 +27,13 @@ module WhatsApp
         raise NotImplementedError, "#{self.class}#deliver debe ser implementado"
       end
 
+      # Confirmación de lectura («visto», doble check azul del lado del lead).
+      # Por defecto no-op: solo lo soportan los proveedores que lo implementen.
+      # @return [Boolean] true si el proveedor aceptó la confirmación
+      def mark_read(_provider_message_id)
+        false
+      end
+
       private
 
       # Lee una clave desde tenant.settings["whatsapp"][...] con fallback a ENV.

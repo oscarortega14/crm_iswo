@@ -1,0 +1,10 @@
+<h2 style="margin-top:0;">Hola<%= " #{@name}" if @name.present? %>,</h2>
+<p>Te recordamos tu reunión con <strong><%= @tenant.name %></strong>:</p>
+<p style="background:#f3f4f6; padding:12px 16px; border-radius:8px; font-size:16px;">
+  <strong><%= @when.capitalize %></strong>
+  <% if @location %><br><span class="muted">Lugar / enlace: <%= @location %></span><% end %>
+</p>
+<% unless @appointment.confirmed_at %>
+  <p>¿Nos confirmas tu asistencia? Responde a nuestro WhatsApp o a este correo.</p>
+<% end %>
+<p>Si necesitas cambiar el horario, escríbenos y te ayudamos a reagendar.</p>

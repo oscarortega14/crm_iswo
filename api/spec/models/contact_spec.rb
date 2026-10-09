@@ -173,4 +173,19 @@ RSpec.describe Contact, type: :model do
       expect(Contact.opted_in_for_whatsapp).not_to include(not_opted)
     end
   end
+
+  describe "origins (todas las vías por las que llegó)" do
+    it "registra el origen al crearse" do
+      c = create(:contact, tenant: tenant, source_kind: "import", source_label: "Excel: base.xlsx")
+      expect(c.origins).to match([ a_hash_including("kind" => "import", "label" => "Excel: base.xlsx", "at" => be_present) ])
+    end
+
+    it "record_origin! agrega nuevas vías sin repetir la misma" do
+      c = create(:contact, tenant: tenant, source_kind: "import", source_label: "Excel: base.xlsx")
+      c.record_origin!("web", "Landing ISO")
+      c.record_origin!("web", "Landing ISO")
+      c.record_origin!("whatsapp", "inbound")
+      expect(c.reload.origins.map { |o| o["kind"] }).to eq(%w[import web whatsapp])
+    end
+  end
 end

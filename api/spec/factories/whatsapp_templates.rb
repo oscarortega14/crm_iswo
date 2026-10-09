@@ -8,5 +8,9 @@ FactoryBot.define do
     language { "es_CO" }
     variable_labels { [] }
     active { true }
+
+    trait :opt_in_request do
+      opt_in_request { true }
+    end
   end
 end

@@ -150,7 +150,7 @@ function DashboardPage() {
     pipelineOptions.find((p) => p.id === activePipelineId)?.name ?? 'Pipeline'
 
   return (
-    <AppPageShell contentClassName="space-y-10">
+    <AppPageShell contentClassName="space-y-6 sm:space-y-10">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <PageHeader

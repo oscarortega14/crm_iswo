@@ -29,7 +29,11 @@ module Api
           opportunity:              %i[contact owner_user],
           duplicate_of_opportunity: %i[contact owner_user]
         )
-        scope = scope.where(resolution: params[:resolution]) if params[:resolution].present?
+        if params[:resolution] == "pending"
+          scope = scope.actionable # sin alertas cuyas oportunidades ya no existen o se cerraron
+        elsif params[:resolution].present?
+          scope = scope.where(resolution: params[:resolution])
+        end
         render_collection(scope.order(created_at: :desc), with: DuplicateFlagSerializer)
       end
 
@@ -51,18 +55,45 @@ module Api
       end
 
       # POST /api/v1/duplicate_flags/:id/merge  — consolida en la ganadora
+      # Fusiona la oportunidad duplicada en la existente y, si son de contactos
+      # distintos, también los contactos: queda uno solo con todos sus orígenes.
       def merge
         authorize @flag, :update?
-        if defined?(Opportunities::Merger)
-          Opportunities::Merger.new(
-            source:       @flag.opportunity,
-            target:       @flag.duplicate_of_opportunity,
-            performed_by: current_user
-          ).call
-        end
-        @flag.resolve!(as: "merged", by: current_user, note: params[:note])
+        DuplicateFlags::Merge.call(flag: @flag, by: current_user, note: params[:note])
         audit_duplicate_flag!("duplicate.merge", @flag)
         render_no_content
+      end
+
+      BULK_LIMIT = 500
+
+      # POST /api/v1/duplicate_flags/bulk_merge — { ids: [...] } o { all: true }
+      # Fusión masiva: misma lógica que #merge, una alerta a la vez (cada una en
+      # su transacción). Las que ya no aplican (una oportunidad se cerró o se
+      # fusionó en una alerta anterior del mismo lote) se omiten con su motivo.
+      def bulk_merge
+        authorize DuplicateFlag, :merge?
+        scope = policy_scope(DuplicateFlag).resolution_pending
+        unless ActiveModel::Type::Boolean.new.cast(params[:all])
+          ids = Array(params[:ids]).map(&:to_i).uniq.reject(&:zero?)
+          return render json: { error: "bad_request", message: "ids requeridos" }, status: :bad_request if ids.empty?
+
+          scope = scope.where(id: ids)
+        end
+
+        merged = 0
+        skipped = []
+        scope.order(:created_at).limit(BULK_LIMIT).pluck(:id).each do |id|
+          flag = DuplicateFlag.actionable.find_by(id: id)
+          next skipped << { id: id.to_s, reason: "ya no aplica (oportunidad cerrada o ya fusionada)" } unless flag
+
+          DuplicateFlags::Merge.call(flag: flag, by: current_user, note: "Fusión masiva")
+          audit_duplicate_flag!("duplicate.merge", flag, bulk: true)
+          merged += 1
+        rescue ActiveRecord::RecordInvalid, ArgumentError => e
+          skipped << { id: id.to_s, reason: e.message.truncate(160) }
+        end
+
+        render json: { data: { merged: merged, skipped: skipped } }, status: :ok
       end
 
       # POST /api/v1/duplicate_flags/:id/ignore
@@ -76,53 +107,16 @@ module Api
       # POST /api/v1/duplicate_flags/scan
       # Escanea todas las oportunidades abiertas del tenant y crea flags para
       # pares que compartan el mismo contacto y aún no tengan un flag existente.
+      # POST /api/v1/duplicate_flags/scan — busca duplicados en todo el tenant:
+      # mismo contacto con varias oportunidades abiertas, y contactos distintos
+      # con el mismo celular o correo (ver DuplicateFlags::Scanner).
       def scan
         authorize DuplicateFlag, :create?
-        created = 0
+        result = DuplicateFlags::Scanner.call(tenant: current_tenant, actor: current_user)
 
-        contact_ids = current_tenant.opportunities.kept
-                                    .where.not(status: %w[won lost merged])
-                                    .group(:contact_id)
-                                    .having("COUNT(*) > 1")
-                                    .pluck(:contact_id)
+        audit_duplicate_scan!(scanned: result.scanned, created: result.created) if result.created.positive?
 
-        contact_ids.each do |contact_id|
-          opps = current_tenant.opportunities.kept
-                               .where(contact_id: contact_id)
-                               .where.not(status: %w[won lost merged])
-                               .order(:created_at)
-                               .to_a
-
-          opps.combination(2).each do |a, b|
-            next if DuplicateFlag.exists?(opportunity_id: a.id, duplicate_of_opportunity_id: b.id)
-            next if DuplicateFlag.exists?(opportunity_id: b.id, duplicate_of_opportunity_id: a.id)
-
-            contact = a.contact
-            matched = if contact.phone_e164.present? && contact.email.present?
-                        "both"
-                      elsif contact.phone_e164.present?
-                        "phone"
-                      else
-                        "email"
-                      end
-
-            DuplicateFlag.create!(
-              tenant:                   current_tenant,
-              opportunity:              a,
-              duplicate_of_opportunity: b,
-              detected_by_user:         current_user,
-              matched_on:               matched,
-              match_score:              1.0
-            )
-            created += 1
-          rescue ActiveRecord::RecordInvalid
-            next
-          end
-        end
-
-        audit_duplicate_scan!(scanned: contact_ids.size, created: created) if created.positive?
-
-        render json: { scanned: contact_ids.size, created: created }, status: :ok
+        render json: { scanned: result.scanned, created: result.created }, status: :ok
       end
 
       private

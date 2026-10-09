@@ -4,7 +4,7 @@ module WhatsApp
   # ==========================================================================
   # WhatsApp::MessageSender — envía un WhatsappMessage outbound.
   # ==========================================================================
-  # Patrón adapter: el servicio elige el adapter (Twilio o Cloud) según el
+  # Patrón adapter: el servicio elige el adapter (Cloud u OpenWA) según el
   # `provider` del WhatsappMessage. Cada adapter expone `#deliver(message)`
   # y devuelve { provider_message_id:, status: }.
   #
@@ -14,11 +14,10 @@ module WhatsApp
   class MessageSender
     class DeliveryError < StandardError; end
 
-    # Mapea provider del modelo (PROVIDERS = %w[twilio whatsapp_cloud]) al
+    # Mapea provider del modelo (PROVIDERS = %w[whatsapp_cloud openwa]) al
     # nombre de la clase adapter. Se mantiene "cloud" como alias por
     # compatibilidad con configuraciones antiguas.
     ADAPTERS = {
-      "twilio"         => "WhatsApp::Adapters::Twilio",
       "whatsapp_cloud" => "WhatsApp::Adapters::Cloud",
       "cloud"          => "WhatsApp::Adapters::Cloud",
       "openwa"         => "WhatsApp::Adapters::OpenWa"

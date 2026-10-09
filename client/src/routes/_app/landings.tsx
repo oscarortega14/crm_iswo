@@ -66,6 +66,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { LandingEditorSheet } from '@/components/landings/LandingEditorSheet'
 import { LandingMetricsSheet } from '@/components/landings/LandingMetricsSheet'
 import { useAuthStore, useUserRole } from '@/stores/auth'
+import { statGridClass } from '@/lib/layoutClasses'
 
 export const Route = createFileRoute('/_app/landings')({
   component: LandingsPage,
@@ -232,7 +233,7 @@ function LandingsPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className={`${statGridClass} md:grid-cols-4`}>
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">

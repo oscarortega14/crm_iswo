@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Normaliza números de teléfono hacia E.164 para WhatsApp (salida Twilio/Meta).
+# Normaliza números de teléfono hacia E.164 para WhatsApp (salida Meta/OpenWA).
 module WhatsappPhone
   module_function
 

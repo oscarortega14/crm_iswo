@@ -125,7 +125,7 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
             Importar contactos
           </DialogTitle>
           <DialogDescription>
-            Descarga la plantilla, complétala y súbela en Excel (.xlsx) o CSV (.csv).
+            Descarga la plantilla, llena la hoja «Contactos» y súbela en Excel (.xlsx) o CSV (.csv).
           </DialogDescription>
         </DialogHeader>
 
@@ -133,20 +133,25 @@ export function ContactImportDialog({ open, onOpenChange }: ContactImportDialogP
           <div className="space-y-3 pr-3">
             <div className="rounded-md border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground space-y-1">
               <p>
-                <span className="font-medium text-foreground">Columnas:</span>{' '}
-                <code className="rounded bg-muted px-1 text-xs">
-                  first_name, last_name, email, phone, company, position, city, country, kind, notes,
-                  stage
-                </code>
+                <span className="font-medium text-foreground">Columnas:</span> Nombres, Apellidos, Cédula o
+                NIT, Celular, Correo y Origen del lead.
               </p>
-              <p className="text-xs">
-                Primera fila = cabeceras · También en español (nombre, apellido, correo…) ·{' '}
-                <code className="text-xs">kind = company</code> para empresas
-              </p>
-              <p className="text-xs">
-                <span className="font-medium text-foreground">stage / etapa:</span> nombre de la etapa
-                del pipeline por defecto (ver hoja «Etapas» de la plantilla). Vacía = primera etapa.
-              </p>
+              <ul className="list-disc space-y-0.5 pl-4 text-xs">
+                <li>
+                  <span className="font-medium text-foreground">Cédula</span> → persona natural;{' '}
+                  <span className="font-medium text-foreground">NIT</span> con dígito de verificación (ej.{' '}
+                  <code className="text-xs">900123456-7</code>) → empresa. En empresas, «Nombres» es la razón
+                  social.
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">Celular con indicativo del país</span>
+                  , ej. <code className="text-xs">+573001234567</code> (+57 Colombia, +52 México, +51 Perú).
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">Origen del lead:</span> de dónde llegó (ver
+                  hoja «Fuentes»). Si escribes uno nuevo, se crea como fuente.
+                </li>
+              </ul>
             </div>
 
             <div className="flex flex-col gap-3 rounded-md border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

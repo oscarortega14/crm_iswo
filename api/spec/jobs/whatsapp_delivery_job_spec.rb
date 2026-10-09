@@ -6,7 +6,7 @@ RSpec.describe WhatsappDeliveryJob, type: :job do
   let(:tenant)  { ActsAsTenant.current_tenant }
   let(:contact) { create(:contact, tenant: tenant) }
   let(:message) do
-    create(:whatsapp_message, :outbound, :twilio, tenant: tenant, contact: contact, status: "queued")
+    create(:whatsapp_message, :outbound, tenant: tenant, contact: contact, status: "queued")
   end
 
   describe "#perform" do

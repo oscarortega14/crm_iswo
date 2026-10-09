@@ -103,6 +103,55 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(ids).not_to include(bare.id)
     end
 
+    describe "filtro whatsapp_consent" do
+      let!(:confirmed) do
+        create(:contact, tenant: tenant, first_name: "Confirmo").tap { |c| c.mark_whatsapp_opt_in!(source: "reply_confirm") }
+      end
+      let!(:declined) do
+        create(:contact, tenant: tenant, first_name: "Nego").tap { |c| c.mark_whatsapp_opt_out!(source: "reply") }
+      end
+      let!(:imported) do
+        create(:contact, tenant: tenant, first_name: "Importado").tap { |c| c.mark_whatsapp_opt_in!(source: "import") }
+      end
+
+      def ids_for(value)
+        get "/api/v1/contacts?whatsapp_consent=#{value}", headers: auth_headers(manager)
+        expect(response).to have_http_status(:ok)
+        json["data"].map { |d| d["id"].to_i }
+      end
+
+      it "confirmed = solo quienes respondieron Sí" do
+        expect(ids_for("confirmed")).to eq([ confirmed.id ])
+      end
+
+      it "opted_out = solo quienes dijeron No" do
+        expect(ids_for("opted_out")).to eq([ declined.id ])
+      end
+
+      it "unconfirmed = con opt-in pero sin confirmar Sí" do
+        expect(ids_for("unconfirmed")).to eq([ imported.id ])
+      end
+
+      it "none = sin opt-in ni opt-out" do
+        expect(ids_for("none")).to match_array([ contact_a.id, contact_b.id ])
+      end
+
+      it "ignora valores desconocidos" do
+        expect(ids_for("x").size).to eq(5)
+      end
+
+      it "respeta el scope del consultor" do
+        mine = create(:contact, tenant: tenant, owner_user: consultant, first_name: "Mio")
+        mine.mark_whatsapp_opt_in!(source: "reply_confirm")
+        create(:contact, tenant: tenant, owner_user: manager).mark_whatsapp_opt_in!(source: "reply_confirm")
+
+        get "/api/v1/contacts?whatsapp_consent=confirmed", headers: auth_headers(consultant)
+        ids = json["data"].map { |d| d["id"].to_i }
+        expect(ids).to include(mine.id)
+        expect(ids.size).to eq(2) # el propio + el sin dueño (bandeja sin asignar)
+      end
+    end
+
     it "consultant ve sus contactos y los sin dueño (bandeja sin asignar), no los de otro consultor" do
       own = create(:contact, tenant: tenant, owner_user: consultant)
       other_owner = create(:user, :consultant, tenant: tenant)
@@ -242,9 +291,10 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       expect(response.body.bytesize).to be_positive
     end
 
-    it "incluye la columna stage y la hoja Etapas del pipeline por defecto" do
+    it "tiene las columnas de la plantilla en español y las hojas de ayuda" do
       require "roo"
       pipeline = create(:pipeline, tenant: tenant, is_default: true)
+      create(:lead_source, tenant: tenant, name: "Feria ISO", kind: "manual")
       create(:pipeline_stage, tenant: tenant, pipeline: pipeline, name: "Calificada")
 
       get "/api/v1/contacts/import_template", headers: auth_headers(manager)
@@ -253,8 +303,11 @@ RSpec.describe "Api::V1::Contacts", type: :request do
       file.write(response.body)
       file.rewind
       book = Roo::Excelx.new(file.path)
-      expect(book.sheet("Contactos").row(1)).to include("stage")
-      expect(book.sheets).to include("Etapas")
+      expect(book.sheet("Contactos").row(1)).to eq(
+        [ "Nombres", "Apellidos", "Cédula o NIT", "Celular (con indicativo)", "Correo", "Origen del lead" ]
+      )
+      expect(book.sheets).to eq(%w[Contactos Instrucciones Fuentes Etapas])
+      expect(book.sheet("Contactos").last_row).to eq(1) # sin filas vacías que el importador contaría
     ensure
       file&.close!
     end
@@ -487,6 +540,85 @@ RSpec.describe "Api::V1::Contacts", type: :request do
            headers: auth_headers(admin)
 
       expect(response).to have_http_status(:bad_request)
+    end
+
+    it "no reactiva a quien dijo que no (opt-out) y lo informa en skipped_opted_out" do
+      said_no = create(:contact, tenant: tenant)
+      said_no.mark_whatsapp_opt_out!(source: "reply")
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_in",
+           params: { ids: [said_no.id] }.to_json,
+           headers: auth_headers(admin)
+
+      expect(json.dig("data", "marked")).to eq(0)
+      expect(json.dig("data", "skipped_opted_out")).to eq(1)
+      expect(said_no.reload.whatsapp_opted_out?).to be(true)
+    end
+  end
+
+  describe "POST /api/v1/contacts/bulk_whatsapp_opt_out" do
+    it "manager registra opt-out manual y quita el opt-in" do
+      c1 = create(:contact, tenant: tenant)
+      c1.mark_whatsapp_opt_in!(source: "import")
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_out",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(manager)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "marked")).to eq(1)
+      c1.reload
+      expect(c1.whatsapp_opted_out?).to be(true)
+      expect(c1.whatsapp_opt_out_source).to eq("manual")
+      expect(c1.whatsapp_opted_in?).to be(false)
+    end
+
+    it "consultant no puede (403)" do
+      c1 = create(:contact, tenant: tenant)
+
+      post "/api/v1/contacts/bulk_whatsapp_opt_out",
+           params: { ids: [c1.id] }.to_json,
+           headers: auth_headers(consultant)
+
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "bajas de correo manuales" do
+    it "manager da de baja y solo deshace las bajas manuales (no las del enlace)" do
+      manual = create(:contact, tenant: tenant, email: "m@example.com")
+      by_link = create(:contact, tenant: tenant, email: "l@example.com",
+                                 email_opt_out_at: Time.current, email_opt_out_source: "unsubscribe")
+
+      post "/api/v1/contacts/bulk_email_opt_out", params: { ids: [ manual.id ] }.to_json, headers: auth_headers(manager)
+      expect(json.dig("data", "marked")).to eq(1)
+      expect(manual.reload).to have_attributes(email_opt_out_source: "manual")
+
+      post "/api/v1/contacts/bulk_email_opt_in", params: { ids: [ manual.id, by_link.id ] }.to_json,
+                                                 headers: auth_headers(manager)
+      expect(json["data"]).to eq("marked" => 1, "skipped" => 1)
+      expect(manual.reload.email_opted_out?).to be(false)
+      expect(by_link.reload.email_opted_out?).to be(true)
+    end
+
+    it "consultant no puede (403)" do
+      c1 = create(:contact, tenant: tenant)
+      post "/api/v1/contacts/bulk_email_opt_out", params: { ids: [ c1.id ] }.to_json, headers: auth_headers(consultant)
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "GET /api/v1/contacts/origin_options" do
+    it "lista los orígenes con su conteo (admin/manager) y 403 para consultor" do
+      2.times { create(:contact, tenant: tenant, source_kind: "import", source_label: "Excel: expo.xlsx") }
+      create(:contact, tenant: tenant, source_kind: "web", source_label: "Landing ISO")
+
+      get "/api/v1/contacts/origin_options", headers: auth_headers(manager)
+      expect(response).to have_http_status(:ok)
+      expect(json["data"].first).to eq("label" => "Excel: expo.xlsx", "kind" => "import", "count" => 2)
+
+      get "/api/v1/contacts/origin_options", headers: auth_headers(consultant)
+      expect(response).to have_http_status(:forbidden)
     end
   end
 end

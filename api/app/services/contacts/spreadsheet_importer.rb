@@ -22,6 +22,27 @@ module Contacts
   class SpreadsheetImporter
     MAX_ROWS = 2000
 
+    # Columnas de la plantilla oficial (ContactsController#import_template), en orden.
+    TEMPLATE_HEADERS = [ "Nombres", "Apellidos", "Cédula o NIT", "Celular (con indicativo)", "Correo", "Origen del lead" ].freeze
+
+    # «Origen del lead» → tipo de LeadSource cuando hay que crear la fuente (palabras sin tildes).
+    ORIGIN_KIND_HINTS = {
+      "whatsapp" => "whatsapp", "facebook" => "meta", "instagram" => "meta", "meta" => "meta",
+      "google" => "google", "landing" => "web", "web" => "web", "pagina" => "web", "sitio" => "web",
+      "referido" => "referral", "referencia" => "referral", "recomendado" => "referral"
+    }.freeze
+
+    # País por nombre (sin tildes, minúsculas) → ISO 3166-1 alfa-2. También se aceptan códigos de 2 letras.
+    COUNTRY_CODES = {
+      "colombia" => "CO", "mexico" => "MX", "peru" => "PE", "ecuador" => "EC", "venezuela" => "VE",
+      "chile" => "CL", "argentina" => "AR", "panama" => "PA", "costa rica" => "CR", "guatemala" => "GT",
+      "honduras" => "HN", "el salvador" => "SV", "nicaragua" => "NI", "bolivia" => "BO", "paraguay" => "PY",
+      "uruguay" => "UY", "republica dominicana" => "DO", "puerto rico" => "PR", "cuba" => "CU",
+      "brasil" => "BR", "espana" => "ES", "estados unidos" => "US", "eeuu" => "US", "ee.uu." => "US",
+      "usa" => "US", "canada" => "CA"
+    }.freeze
+    DEFAULT_COUNTRY = "CO"
+
     # warnings: filas importadas con algún ajuste (p.ej. etapa desconocida).
     Result = Struct.new(:created_count, :skipped_count, :errors, :warnings, keyword_init: true) do
       def warnings = self[:warnings] || []
@@ -55,17 +76,19 @@ module Contacts
         rows.each_with_index do |row, idx|
           line_no = idx + 2 # cabecera = 1
           h = normalize_row(row)
-          attrs = build_attrs(h)
+          attrs = build_attrs(h, line_no, warnings)
           if attrs.nil?
             skipped_count += 1
             next
           end
 
           stage = resolve_stage(h["stage"], line_no, warnings)
+          lead_source = resolve_lead_source(h["origin"])
           contact = @tenant.contacts.new(attrs.merge(owner_user: @user))
           contact.save!
+          contact.record_origin!("import", h["origin"]) if h["origin"].present?
           Contacts::ProspectOpportunityCreator.call(contact: contact, actor: @user, stage: stage,
-                                                    origin: "contact_import")
+                                                    origin: "contact_import", lead_source: lead_source)
           created_count += 1
         rescue ActiveRecord::RecordInvalid => e
           errors << { row: line_no, message: e.record.errors.full_messages.join(", ") }
@@ -207,7 +230,7 @@ module Contacts
 
     KNOWN_IMPORT_KEYS = %w[
       first_name last_name full_name email phone company position
-      city country kind notes document_id stage
+      city country kind notes document_id stage origin
     ].freeze
 
     # Devuelve el índice (1-based) de la fila con más cabeceras reconocidas.
@@ -307,6 +330,7 @@ module Contacts
     def normalize_header_key(header)
       # [[:space:]] captura espacios unicode (non-breaking space, etc.) que \s no captura
       s = header.to_s.gsub(/[[:space:]]+/, " ").strip.downcase
+      s = I18n.transliterate(s.sub(/\s*\(.*\)\s*\z/, "")).strip
       case s
       when "nombre", "first_name", "firstname", "nombres" then "first_name"
       when "apellido", "last_name", "lastname", "apellidos" then "last_name"
@@ -324,8 +348,10 @@ module Contacts
       when "tipo", "kind", "clase" then "kind"
       when "notas", "notes", "observaciones", "observacion",
            "observación" then "notes"
-      when "cc", "cedula", "cédula", "nit", "documento",
-           "document_id", "identificacion", "identificación" then "document_id"
+      when "cc", "cedula", "cédula", "nit", "documento", "cedula o nit", "cc o nit", "cc/nit",
+           "cedula/nit", "numero de documento", "document_id", "identificacion", "identificación" then "document_id"
+      when "origen", "origen del lead", "fuente", "fuente del lead", "origen o fuente",
+           "origen o fuente del lead", "lead source", "source" then "origin"
       when "etapa", "stage", "estado", "fase", "etapa del pipeline",
            "etapa_pipeline", "pipeline_stage" then "stage"
       else
@@ -333,7 +359,7 @@ module Contacts
       end
     end
 
-    def build_attrs(h)
+    def build_attrs(h, line_no = nil, warnings = [])
       return nil if h.values.all?(&:blank?)
 
       # Partir "NOMBRE Y APELLIDO" en first_name + last_name si vienen juntos
@@ -343,7 +369,8 @@ module Contacts
         h["last_name"]  = parts[1]
       end
 
-      kind = infer_kind(h)
+      document = Contacts::DocumentId.classify(h["document_id"])
+      kind = infer_kind(h, document)
 
       src =
         if (@filename.to_s.downcase.end_with?(".xlsx", ".xls"))
@@ -352,13 +379,23 @@ module Contacts
           @filename.present? ? "CSV: #{File.basename(@filename)}" : "CSV import"
         end
 
-      country = h["country"].presence || "CO"
+      # País: nombre («Colombia») o código («CO»); si no viene, se toma del indicativo
+      # del celular; si tampoco, Colombia.
+      country_hint = resolve_country(h["country"])
+      phone, phone_country = safe_phone(h["phone"], country_hint || DEFAULT_COUNTRY)
+      country = country_hint || phone_country || DEFAULT_COUNTRY
 
-      # Normalizar teléfono: intentar parsear con país por defecto; descartar si inválido
-      phone = safe_phone(h["phone"], country)
+      if h["country"].present? && country_hint.nil?
+        warnings << { row: line_no, message: "país «#{h['country']}» no reconocido; se usó #{country}" }
+      end
+      if h["phone"].present? && phone.nil?
+        warnings << { row: line_no, message: "celular «#{h['phone']}» no es válido (escríbelo con indicativo, ej. +573001234567); se importó sin celular" }
+      end
 
-      # Normalizar email: descartar silenciosamente si el formato no es válido
       email = safe_email(h["email"])
+      if h["email"].present? && email.nil?
+        warnings << { row: line_no, message: "email «#{h['email']}» no es válido; se importó sin email" }
+      end
 
       attrs = {
         email:        email,
@@ -366,14 +403,15 @@ module Contacts
         city:         h["city"],
         country:      country,
         notes:        h["notes"],
-        document_id:  h["document_id"],
+        document_id:  document&.number,
         source_kind:  "import",
         source_label: src
       }
 
       if kind == "company"
         attrs[:kind] = "company"
-        attrs[:company_name] = h["company"].presence
+        # Con NIT, «Nombres» (+ «Apellidos») es la razón social.
+        attrs[:company_name] = h["company"].presence || [ h["first_name"], h["last_name"] ].compact_blank.join(" ").presence
         attrs[:first_name] = nil
         attrs[:last_name] = nil
         attrs[:job_title] = h["position"].presence
@@ -388,24 +426,58 @@ module Contacts
       attrs.compact
     end
 
-    def infer_kind(h)
+    # Prioridad: columna «Tipo» explícita → Cédula (persona) o NIT (empresa) →
+    # solo «Empresa» sin nombre → persona.
+    def infer_kind(h, document = nil)
       raw = h["kind"].to_s.downcase.strip
       return "company" if %w[company empresa organizacion organización].include?(raw)
       return "person" if %w[person persona individual contacto].include?(raw)
+      return document.kind if document
 
       return "company" if h["first_name"].blank? && h["last_name"].blank? && h["full_name"].blank? && h["company"].present?
 
       "person"
     end
 
-    # Intenta normalizar al formato E.164.  Si el número no es válido devuelve nil
-    # para que no falle la validación del modelo.
-    def safe_phone(raw, country = "CO")
-      return nil if raw.blank?
+    # Normaliza a E.164. Acepta «+573001234567», «+57 300 123 4567» y también el
+    # número sin «+» que deja Excel al guardarlo como número (573001234567).
+    # @return [Array(String, String), Array(nil, nil)] [e164, país ISO del número]
+    def safe_phone(raw, country = DEFAULT_COUNTRY)
+      return [ nil, nil ] if raw.blank?
 
       cleaned = raw.to_s.gsub(/[\s\-\(\)\.]+/, "")
-      parsed  = Phonelib.parse(cleaned, country)
-      parsed.valid? ? parsed.e164 : nil
+      candidates = [ Phonelib.parse(cleaned, country) ]
+      candidates << Phonelib.parse("+#{cleaned}") if !cleaned.start_with?("+") && cleaned.gsub(/\D/, "").length >= 11
+      parsed = candidates.find(&:valid?)
+      parsed ? [ parsed.e164, parsed.country ] : [ nil, nil ]
+    end
+
+    # «Origen del lead» → fuente del tenant (por nombre, sin tildes ni mayúsculas).
+    # Si no existe se crea, para que el origen quede en la oportunidad y en los
+    # reportes/exportaciones; queda editable en Ajustes → Fuentes de lead.
+    def resolve_lead_source(raw)
+      name = raw.to_s.squish
+      return nil if name.blank?
+
+      @lead_sources ||= @tenant.lead_sources.to_a.index_by { |ls| self.class.normalize_stage_name(ls.name) }
+      key = self.class.normalize_stage_name(name)
+      @lead_sources[key] ||= @tenant.lead_sources.create!(name: name, kind: lead_source_kind_for(key))
+    rescue ActiveRecord::RecordInvalid
+      @tenant.lead_sources.where("LOWER(name) = ?", name.downcase).first
+    end
+
+    def lead_source_kind_for(normalized)
+      ORIGIN_KIND_HINTS.each { |word, kind| return kind if normalized.include?(word) }
+      "manual"
+    end
+
+    def resolve_country(raw)
+      return nil if raw.blank?
+
+      value = raw.to_s.strip
+      return value.upcase if value.match?(/\A[A-Za-z]{2}\z/)
+
+      COUNTRY_CODES[I18n.transliterate(value).downcase.squish]
     end
 
     # Devuelve el email si tiene formato válido; nil en caso contrario.

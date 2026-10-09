@@ -1,0 +1,6 @@
+Hola<%= " #{@name}" if @name.present? %>,
+
+Te recordamos tu reunión con <%= @tenant.name %>: <%= @when %>.
+<% if @location %>Lugar / enlace: <%= @location %>
+<% end %><% unless @appointment.confirmed_at %>¿Nos confirmas tu asistencia? Responde a nuestro WhatsApp o a este correo.
+<% end %>Si necesitas cambiar el horario, escríbenos y te ayudamos a reagendar.

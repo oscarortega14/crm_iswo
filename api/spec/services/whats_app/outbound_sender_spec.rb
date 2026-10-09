@@ -5,23 +5,21 @@ require "rails_helper"
 RSpec.describe WhatsApp::OutboundSender do
   let(:tenant) { ActsAsTenant.current_tenant }
   let(:contact) { create(:contact, tenant: tenant) }
-  let!(:twilio_integration) do
-    create(:ad_integration, :twilio,
+  let!(:cloud_integration) do
+    create(:ad_integration, :cloud,
            tenant:             tenant,
            account_identifier: "+5731999999999",
-           credentials:      { "account_sid" => "ACxxxxxxxx", "auth_token" => "secret" })
+           credentials:      { "access_token" => "fake-access-token" })
   end
 
   around do |example|
     old_provider = ENV.delete("WHATSAPP_PROVIDER")
-    old_number   = ENV.delete("TWILIO_WHATSAPP_NUMBER")
     example.run
   ensure
-    ENV["WHATSAPP_PROVIDER"]      = old_provider if old_provider
-    ENV["TWILIO_WHATSAPP_NUMBER"] = old_number   if old_number
+    ENV["WHATSAPP_PROVIDER"] = old_provider if old_provider
   end
 
-  before { allow(WhatsappDeliveryJob).to receive(:perform_now) }
+  before { allow(WhatsappDeliveryJob).to receive(:perform_later) }
 
   it "arma y guarda el mensaje saliente con el número de la integración configurada" do
     result = described_class.call(
@@ -33,7 +31,7 @@ RSpec.describe WhatsApp::OutboundSender do
     expect(result.message.direction).to eq("out")
     expect(result.message.from_number).to eq("+5731999999999")
     expect(result.message.to_number).to eq("+573001234567")
-    expect(WhatsappDeliveryJob).to have_received(:perform_now).with(result.message.id)
+    expect(WhatsappDeliveryJob).to have_received(:perform_later).with(result.message.id)
   end
 
   it "asocia la oportunidad cuando se pasa y actualiza su última actividad" do
@@ -77,6 +75,19 @@ RSpec.describe WhatsApp::OutboundSender do
     expect(result.message.body).to be_nil
   end
 
+  it "copia variable_names de la plantilla al mensaje (variables con nombre de Meta)" do
+    template = create(:whatsapp_template, tenant: tenant, meta_template_name: "primer_contacto",
+                                           language: "es_CO", variable_labels: ["Nombre"],
+                                           variable_names: ["primer_nombre"])
+
+    result = described_class.call(
+      tenant: tenant, contact: contact, to_number: "3001234567",
+      body: nil, whatsapp_template_id: template.id, template_params: ["Oscar"]
+    )
+
+    expect(result.message.template_variable_names).to eq(["primer_nombre"])
+  end
+
   it "eleva RecordNotFound si el whatsapp_template_id no existe en el catálogo activo del tenant" do
     inactive = create(:whatsapp_template, tenant: tenant, active: false)
 
@@ -89,7 +100,7 @@ RSpec.describe WhatsApp::OutboundSender do
   end
 
   it "devuelve error_code :not_configured si el tenant no tiene envío saliente" do
-    twilio_integration.destroy!
+    cloud_integration.destroy!
 
     result = described_class.call(
       tenant: tenant, contact: contact, to_number: "3001234567", body: "Hola"

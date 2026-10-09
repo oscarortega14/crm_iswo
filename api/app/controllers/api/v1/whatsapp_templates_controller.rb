@@ -41,6 +41,38 @@ module Api
         render_no_content
       end
 
+      # POST /api/v1/whatsapp_templates/sync — trae category/status/id reales
+      # desde Meta y actualiza las plantillas que ya existen en el catálogo.
+      def sync
+        authorize WhatsappTemplate, :sync?
+        result = WhatsApp::TemplateSync.call(tenant: current_tenant)
+
+        if result.success?
+          AuditLogger.record!(
+            tenant:      current_tenant,
+            user:        current_user,
+            action:      "whatsapp_template_sync",
+            entity_type: "WhatsappTemplate",
+            metadata:    {
+              updated_count:         result.updated.size,
+              new_in_meta_count:     result.new_in_meta.size,
+              missing_in_meta_count: result.missing_in_meta.size
+            },
+            ip_address:  request.remote_ip,
+            user_agent:  request.user_agent
+          )
+          render json: {
+            data: {
+              updated:         result.updated,
+              new_in_meta:     result.new_in_meta,
+              missing_in_meta: result.missing_in_meta
+            }
+          }, status: :ok
+        else
+          render json: { error: "sync_failed", message: result.message }, status: :unprocessable_entity
+        end
+      end
+
       private
 
       def set_whatsapp_template
@@ -49,7 +81,8 @@ module Api
 
       def permitted
         params.require(:whatsapp_template)
-              .permit(:name, :meta_template_name, :language, :active, variable_labels: [], variable_names: [])
+              .permit(:name, :meta_template_name, :language, :active, :opt_in_request,
+                      variable_labels: [], variable_names: [])
       end
     end
   end

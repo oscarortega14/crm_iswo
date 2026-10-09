@@ -20,6 +20,7 @@ import {
   getTimeGreeting,
 } from '@/lib/routeDayGreeting'
 import { cn, formatCurrency, formatRelativeTime, type TemperatureLevel } from '@/lib/utils'
+import { statGridClass } from '@/lib/layoutClasses'
 
 interface DailyBriefingProps {
   data?: DashboardBriefing
@@ -156,7 +157,7 @@ export function DailyBriefing({
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className={`${statGridClass} xl:grid-cols-3`}>
         {kpiCards.map((card) => (
           <Card key={card.title}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">

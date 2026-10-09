@@ -170,6 +170,15 @@ export async function mergeDuplicateFlag(flagId: string): Promise<void> {
   await api.post(`/duplicate_flags/${flagId}/merge`, {})
 }
 
+/** Fusión masiva: las alertas elegidas o todas las pendientes (máx. 500 por vez). */
+export async function bulkMergeDuplicateFlags(
+  target: { ids: string[] } | { all: true },
+): Promise<{ merged: number; skipped: { id: string; reason: string }[] }> {
+  const res = await api.post('/duplicate_flags/bulk_merge', target)
+  const d = (res.data as { data?: { merged?: number; skipped?: { id: string; reason: string }[] } }).data ?? {}
+  return { merged: Number(d.merged ?? 0), skipped: d.skipped ?? [] }
+}
+
 export async function ignoreDuplicateFlag(flagId: string): Promise<void> {
   await api.post(`/duplicate_flags/${flagId}/ignore`, {})
 }

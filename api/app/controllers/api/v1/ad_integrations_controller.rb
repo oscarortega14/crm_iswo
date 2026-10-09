@@ -154,7 +154,7 @@ module Api
         h.stringify_keys
       end
 
-      # URLs absolutas para configurar Meta/Google/Twilio en sus consolas (mismo host que recibirá webhooks).
+      # URLs absolutas para configurar Meta/Google en sus consolas (mismo host que recibirá webhooks).
       # Opcional: ENV API_PUBLIC_ORIGIN si el API está detrás de proxy y request.base_url no es público.
       def integration_webhooks_meta
         root = public_api_origin.chomp("/")
@@ -165,7 +165,6 @@ module Api
             meta_verify_get:           "#{base}/meta",
             meta_leads_post:           "#{base}/meta",
             google_leads_post:         "#{base}/google",
-            whatsapp_twilio_post:      "#{base}/whatsapp/twilio",
             whatsapp_cloud_verify_get: "#{base}/whatsapp/cloud",
             whatsapp_cloud_post:       "#{base}/whatsapp/cloud",
             whatsapp_openwa_post:      "#{base}/whatsapp/openwa"

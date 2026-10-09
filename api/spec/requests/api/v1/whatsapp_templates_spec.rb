@@ -37,6 +37,28 @@ RSpec.describe "Api::V1::WhatsappTemplates", type: :request do
       expect(json.dig("data", "attributes", "variable_labels")).to eq(["Nombre"])
     end
 
+    it "admin crea plantilla con variables con nombre (formato nuevo de Meta)" do
+      post "/api/v1/whatsapp_templates",
+           headers: auth_headers(admin),
+           params: { whatsapp_template: {
+             name: "Bienvenida", meta_template_name: "bienvenida", language: "es_CO",
+             variable_labels: ["Nombre"], variable_names: ["primer_nombre"]
+           } }.to_json
+      expect(response).to have_http_status(:created)
+      expect(json.dig("data", "attributes", "variable_names")).to eq(["primer_nombre"])
+    end
+
+    it "admin crea plantilla marcada como opt_in_request" do
+      post "/api/v1/whatsapp_templates",
+           headers: auth_headers(admin),
+           params: { whatsapp_template: {
+             name: "Confirmación de contacto", meta_template_name: "confirmacion_contacto_whatsapp",
+             language: "es_CO", opt_in_request: true
+           } }.to_json
+      expect(response).to have_http_status(:created)
+      expect(json.dig("data", "attributes", "opt_in_request")).to be(true)
+    end
+
     it "consultant no puede crear" do
       post "/api/v1/whatsapp_templates",
            headers: auth_headers(consultant),
@@ -71,6 +93,43 @@ RSpec.describe "Api::V1::WhatsappTemplates", type: :request do
     it "manager no puede eliminar" do
       delete "/api/v1/whatsapp_templates/#{template.id}", headers: auth_headers(manager)
       expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "POST /api/v1/whatsapp_templates/sync" do
+    it "manager sincroniza y actualiza category/meta_status desde Meta" do
+      tenant = ActsAsTenant.current_tenant
+      create(:ad_integration, :cloud, tenant: tenant,
+             credentials: { "access_token" => "tok" }, metadata: { "waba_id" => "999" })
+      local = create(:whatsapp_template, tenant: tenant, meta_template_name: "confirmacion_contacto",
+                      language: "es_CO")
+
+      stub_request(:get, %r{graph\.facebook\.com/v18\.0/999/message_templates})
+        .to_return(
+          status: 200,
+          body: { data: [
+            { id: "abc", name: "confirmacion_contacto", language: "es_CO", status: "APPROVED", category: "MARKETING" }
+          ] }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      post "/api/v1/whatsapp_templates/sync", headers: auth_headers(manager)
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig("data", "updated").size).to eq(1)
+      expect(local.reload.meta_status).to eq("APPROVED")
+    end
+
+    it "consultant no puede sincronizar (403)" do
+      consultant = create(:user, :consultant, tenant: ActsAsTenant.current_tenant)
+      post "/api/v1/whatsapp_templates/sync", headers: auth_headers(consultant)
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "422 con mensaje claro si falta el WABA ID" do
+      post "/api/v1/whatsapp_templates/sync", headers: auth_headers(admin)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json["message"]).to include("WABA ID")
     end
   end
 end

@@ -13,6 +13,8 @@ class WhatsappCampaignRecipient < ApplicationRecord
   belongs_to :contact
   belongs_to :opportunity, optional: true
   belongs_to :whatsapp_message, optional: true, inverse_of: :whatsapp_campaign_recipient
+  # «Mensaje al autorizar» enviado cuando respondió «Sí» (WhatsApp::ConfirmationFollowup).
+  belongs_to :confirm_reply_message, class_name: "WhatsappMessage", optional: true
 
   enum :status, STATUSES.zip(STATUSES).to_h, prefix: :status, default: "pending"
 

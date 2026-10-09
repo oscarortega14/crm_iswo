@@ -21,7 +21,7 @@ Rails.application.configure do
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = :local
 
-  # Kamal/Cloudflare/nginx terminan TLS delante de Puma — cookies seguras + HSTS.
+  # Dokku/Cloudflare/nginx terminan TLS delante de Puma — cookies seguras + HSTS.
   config.assume_ssl = ActiveModel::Type::Boolean.new.cast(ENV.fetch("ASSUME_SSL", "true"))
 
   config.force_ssl = true
@@ -47,14 +47,20 @@ Rails.application.configure do
   config.active_job.queue_adapter = :solid_queue
   config.solid_queue.connects_to = { database: { writing: :queue } }
 
-  # Recordatorios, briefing y exportaciones — Postmark (POSTMARK_API_TOKEN).
-  config.action_mailer.delivery_method = :postmark
+  # Recordatorios, briefing y exportaciones — AWS SES v2 (aws-actionmailer-ses).
+  # Credenciales: cadena estándar de AWS (IAM role del EC2, o
+  # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY si no hay role) + AWS_REGION.
+  # Requiere identidad verificada en SES (dominio o "no-reply@..." individual)
+  # en esa región; si la cuenta SES sigue en sandbox, solo entrega a
+  # destinatarios verificados — pedir salida de sandbox antes de ir a prod.
+  config.action_mailer.delivery_method = :ses_v2
+  config.action_mailer.ses_v2_settings = { region: ENV.fetch("AWS_REGION", "us-east-1") }
   config.action_mailer.raise_delivery_errors = true
   config.action_mailer.perform_deliveries = true
 
   # Set host to be used by links generated in mailer templates.
   config.action_mailer.default_url_options = {
-    host: ENV.fetch("APP_HOST", "crm.iswo.com.co")
+    host: ENV.fetch("APP_HOST", "iswocrm.com")
   }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.

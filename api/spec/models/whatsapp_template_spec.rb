@@ -46,6 +46,17 @@ RSpec.describe WhatsappTemplate, type: :model do
     end
   end
 
+  describe "#opt_in_request" do
+    it "es false por defecto" do
+      expect(tpl.opt_in_request).to be(false)
+    end
+
+    it "se puede marcar con el trait :opt_in_request" do
+      marked = create(:whatsapp_template, :opt_in_request, tenant: tenant)
+      expect(marked.opt_in_request?).to be(true)
+    end
+  end
+
   describe ".active scope" do
     it "devuelve solo plantillas activas" do
       active = create(:whatsapp_template, tenant: tenant, active: true)
@@ -63,6 +74,17 @@ RSpec.describe WhatsappTemplate, type: :model do
 
     it "es 0 sin variables" do
       expect(tpl.variable_count).to eq(0)
+    end
+  end
+
+  describe "#named_parameters?" do
+    it "es true si variable_names tiene al menos un nombre" do
+      tpl.variable_names = ["primer_nombre"]
+      expect(tpl.named_parameters?).to be(true)
+    end
+
+    it "es false sin variable_names (plantilla posicional clásica)" do
+      expect(tpl.named_parameters?).to be(false)
     end
   end
 end

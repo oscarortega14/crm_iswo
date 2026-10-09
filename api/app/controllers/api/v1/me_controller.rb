@@ -16,10 +16,11 @@ module Api
 
       # PATCH /api/v1/me
       def update
-        if current_user.update(me_params)
-          render_resource(current_user, with: UserSerializer, params: { include_permissions: true })
+        @me = current_user
+        if @me.update(me_params)
+          render_resource(@me, with: UserSerializer, params: { include_permissions: true })
         else
-          render_unprocessable(current_user)
+          render_unprocessable(@me)
         end
       end
 

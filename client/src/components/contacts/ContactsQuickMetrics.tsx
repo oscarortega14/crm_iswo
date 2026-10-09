@@ -82,7 +82,7 @@ export function ContactsQuickMetrics({
             role="button"
             tabIndex={0}
             className={cn(
-              'cursor-pointer transition-all hover:shadow-md',
+              'cursor-pointer gap-0 py-0 transition-all hover:shadow-md sm:py-6',
               active && `ring-2 ${activeRing}`,
             )}
             onClick={() => onSegmentChange(active ? undefined : key)}
@@ -93,21 +93,21 @@ export function ContactsQuickMetrics({
               }
             }}
           >
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center gap-3">
+            <CardContent className="px-3 py-3 sm:px-6 sm:pt-4 sm:pb-3">
+              <div className="flex items-center gap-2.5 sm:gap-3">
                 <div
                   className={cn(
-                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10',
                     iconClass,
                   )}
                 >
-                  <Icon className="h-5 w-5" aria-hidden />
+                  <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-2xl font-semibold tabular-nums">
+                  <p className="text-xl font-semibold tabular-nums sm:text-2xl">
                     {isLoading ? '…' : valueFor(key)}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="text-xs leading-tight text-muted-foreground sm:truncate">
                     <span className="mr-1" aria-hidden>
                       {emoji}
                     </span>

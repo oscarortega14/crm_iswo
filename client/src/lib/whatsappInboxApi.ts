@@ -17,6 +17,10 @@ export interface ConversationRow {
   lastMessageAt: string | null
   unreadCount: number
   bucket: ConversationBucket
+  /** Dijo «Sí» y ninguna persona le ha respondido todavía. */
+  awaitingReply: boolean
+  /** Un asesor pausó el asistente/automático en este chat. */
+  automationPaused: boolean
 }
 
 export type ConversationsFilters = {
@@ -36,6 +40,8 @@ export type ConversationsPagination = {
 export type ConversationsListResult = {
   conversations: ConversationRow[]
   pagination?: ConversationsPagination
+  /** El asistente IA está encendido y puede responder (config general del tenant). */
+  assistantActive: boolean
 }
 
 export function mapConversationResource(resource: JsonApiResource): ConversationRow | null {
@@ -55,6 +61,8 @@ export function mapConversationResource(resource: JsonApiResource): Conversation
     lastMessageStatus: typeof a.last_message_status === 'string' ? a.last_message_status : 'pending',
     lastMessageAt: a.last_message_at != null ? String(a.last_message_at) : null,
     unreadCount: Number(a.unread_count ?? 0),
+    awaitingReply: a.awaiting_reply === true,
+    automationPaused: a.automation_paused === true,
     bucket: (['mine', 'network', 'unassigned', 'other'] as const).includes(a.bucket as ConversationBucket)
       ? (a.bucket as ConversationBucket)
       : 'other',
@@ -75,12 +83,30 @@ export async function fetchConversations(filters: ConversationsFilters = {}): Pr
     .filter((row): row is ConversationRow => row !== null)
   const pagination = (response.data as { meta?: { pagination?: ConversationsPagination } })?.meta?.pagination
 
-  return { conversations, pagination }
+  const assistantActive = (response.data as { meta?: { assistant_active?: boolean } })?.meta?.assistant_active === true
+  return { conversations, pagination, assistantActive }
 }
 
-export async function fetchConversationStats(): Promise<{ unread: number }> {
-  const response = await api.get<{ data: { unread: number } }>('/whatsapp_conversations/stats')
-  return { unread: Number(response.data?.data?.unread ?? 0) }
+export type ConversationStats = {
+  unread: number
+  /** Id del mensaje entrante más reciente visible para el usuario: sube con cada mensaje nuevo. */
+  latestInboundId: number | null
+}
+
+export async function fetchConversationStats(): Promise<ConversationStats> {
+  const response = await api.get<{ data: { unread: number; latest_inbound_id?: number | null } }>(
+    '/whatsapp_conversations/stats',
+  )
+  const latest = response.data?.data?.latest_inbound_id
+  return {
+    unread: Number(response.data?.data?.unread ?? 0),
+    latestInboundId: latest == null ? null : Number(latest),
+  }
+}
+
+/** Pausar (un asesor toma el control) o reanudar el asistente en un chat. */
+export async function setConversationAutomation(contactId: string, paused: boolean): Promise<void> {
+  await api.patch(`/whatsapp_conversations/${contactId}/automation`, { paused })
 }
 
 export async function markConversationRead(contactId: string): Promise<void> {

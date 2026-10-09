@@ -74,6 +74,7 @@ import {
   contactEditInitialFromSummary,
 } from '@/components/contacts/ContactEditDialog'
 import { fetchContactDetail } from '@/lib/contactApi'
+import { markConversationRead } from '@/lib/whatsappInboxApi'
 import type { Opportunity, OpportunityTemperature, Pipeline, TenantFieldDefinition } from '@/types'
 
 interface OpportunitySlideOverProps {
@@ -224,6 +225,15 @@ export function OpportunitySlideOver({
               typeof a.error_message === 'string' && a.error_message.trim()
                 ? String(a.error_message)
                 : undefined,
+            mediaUrl:
+              typeof a.media_url === 'string' && a.media_url.trim() ? String(a.media_url) : undefined,
+            templateName:
+              typeof a.template_name === 'string' && a.template_name.trim()
+                ? String(a.template_name)
+                : undefined,
+            templateParams: Array.isArray(a.template_params)
+              ? a.template_params.map((p) => String(p))
+              : undefined,
           }
         })
         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
@@ -237,6 +247,24 @@ export function OpportunitySlideOver({
       return hasPending ? 5000 : 10000
     },
   })
+
+  // «Visto»: con la pestaña WhatsApp abierta (y la página visible), marcar la
+  // conversación como leída cada vez que aparece un entrante nuevo — igual que
+  // la bandeja de /whatsapp. El backend envía la confirmación de lectura a Meta.
+  const lastInboundMarkedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const contactId = opportunity?.contact_id
+    if (activeTab !== 'whatsapp' || !contactId || document.visibilityState !== 'visible') return
+    const lastInbound = [...(threadMessages ?? [])].reverse().find((m) => !m.isOutgoing)
+    if (!lastInbound || lastInbound.id === lastInboundMarkedRef.current) return
+    lastInboundMarkedRef.current = lastInbound.id
+    markConversationRead(contactId)
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.whatsappConversations.all }))
+      .catch(() => {
+        // No crítico: queda como no leído y se reintenta con el próximo entrante.
+        lastInboundMarkedRef.current = null
+      })
+  }, [activeTab, opportunity?.contact_id, threadMessages, queryClient])
 
   const invalidateTemperatureContext = (oppId?: string) => {
     if (oppId) {
@@ -573,22 +601,22 @@ export function OpportunitySlideOver({
               onValueChange={setActiveTab}
               className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
             >
-              <TabsList className="mx-4 mt-4 w-fit">
-                <TabsTrigger value="overview" className="gap-1.5">
+              <TabsList className="mx-4 mt-4 flex h-auto w-auto sm:inline-flex sm:h-9 sm:w-fit">
+                <TabsTrigger value="overview" className="min-w-0 flex-col gap-0.5 px-1 py-1.5 text-[11px] sm:flex-row sm:gap-1.5 sm:px-2 sm:py-1 sm:text-sm">
                   <FileText className="size-3.5" />
                   Resumen
                 </TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5">
+                <TabsTrigger value="activity" className="min-w-0 flex-col gap-0.5 px-1 py-1.5 text-[11px] sm:flex-row sm:gap-1.5 sm:px-2 sm:py-1 sm:text-sm">
                   <History className="size-3.5" />
                   Actividad
                 </TabsTrigger>
                 {showRemindersTab && (
-                  <TabsTrigger value="reminders" className="gap-1.5">
+                  <TabsTrigger value="reminders" className="min-w-0 flex-col gap-0.5 px-1 py-1.5 text-[11px] sm:flex-row sm:gap-1.5 sm:px-2 sm:py-1 sm:text-sm">
                     <Bell className="size-3.5" />
                     Recordatorios
                   </TabsTrigger>
                 )}
-                <TabsTrigger value="whatsapp" className="gap-1.5">
+                <TabsTrigger value="whatsapp" className="min-w-0 flex-col gap-0.5 px-1 py-1.5 text-[11px] sm:flex-row sm:gap-1.5 sm:px-2 sm:py-1 sm:text-sm">
                   <MessageSquare className="size-3.5" />
                   WhatsApp
                 </TabsTrigger>

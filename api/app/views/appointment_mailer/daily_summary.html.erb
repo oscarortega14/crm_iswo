@@ -1,0 +1,10 @@
+<h2 style="margin-top:0;">Citas de hoy en <%= @tenant.name %></h2>
+<table style="width:100%; border-collapse:collapse;">
+  <% @rows.each do |row| %>
+    <tr>
+      <td style="padding:8px 0; border-bottom:1px solid #e5e7eb; white-space:nowrap;"><strong><%= row[:time] %></strong></td>
+      <td style="padding:8px; border-bottom:1px solid #e5e7eb;"><%= row[:contact] %><% if row[:owner] %> · <span class="muted"><%= row[:owner] %></span><% end %></td>
+      <td style="padding:8px 0; border-bottom:1px solid #e5e7eb; text-align:right;"><%= row[:confirmed] ? "Confirmó" : "Sin confirmar" %></td>
+    </tr>
+  <% end %>
+</table>

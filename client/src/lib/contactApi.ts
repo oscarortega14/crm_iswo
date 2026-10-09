@@ -1,3 +1,4 @@
+import { mapContactOrigins, type ContactOrigin } from '@/lib/contactOrigins'
 import type { QueryClient } from '@tanstack/react-query'
 import api, { formatRailsError } from '@/lib/api'
 import { jsonApiPrimaryList, jsonApiPrimaryOne, type JsonApiResource } from '@/lib/opportunityApi'
@@ -7,6 +8,16 @@ export type ContactKind = 'person' | 'company'
 
 /** Segmentos de métricas rápidas en /contacts */
 export type ContactSegment = 'clients' | 'prospects' | 'hot_leads' | 'stale'
+
+/** Filtro de consentimiento de WhatsApp en /contacts (ver Contact.filter_by_whatsapp_consent). */
+export type ContactWhatsappConsent = 'confirmed' | 'opted_out' | 'unconfirmed' | 'none'
+
+export const WHATSAPP_CONSENT_LABELS: Record<ContactWhatsappConsent, string> = {
+  confirmed: 'Confirmaron "Sí"',
+  opted_out: 'No autorizaron',
+  unconfirmed: 'Opt-in sin confirmar',
+  none: 'Sin opt-in',
+}
 
 export interface ContactQuickStats {
   clients: number
@@ -44,11 +55,30 @@ export interface ContactSummary {
   ownerId?: string
   canEdit?: boolean
   sourceLabel?: string
+  /** Todas las vías por las que llegó (incluye contactos fusionados). */
+  origins?: ContactOrigin[]
   lastContactedAt?: string
   customFields?: Record<string, unknown>
   landingOrigins?: ContactLandingOrigin[]
   whatsappOptedIn?: boolean
   whatsappOptInSource?: string
+  whatsappOptInAt?: string
+  /** El contacto dijo explícitamente que NO quiere WhatsApp ("No autorizo"). */
+  whatsappOptedOut?: boolean
+  whatsappOptOutAt?: string
+  /** No recibe campañas de correo: se dio de baja, rebotó, marcó spam o se marcó a mano. */
+  emailOptedOut?: boolean
+  emailOptOutSource?: EmailOptOutSource
+  emailOptOutAt?: string
+}
+
+export type EmailOptOutSource = 'unsubscribe' | 'bounce' | 'complaint' | 'manual'
+
+export const EMAIL_OPT_OUT_LABELS: Record<EmailOptOutSource, string> = {
+  unsubscribe: 'Se dio de baja desde el correo',
+  bounce: 'El correo rebotó (no existe o está lleno)',
+  complaint: 'Marcó un correo como spam',
+  manual: 'Marcado a mano: no quiere correos',
 }
 
 type ContactAttributes = {
@@ -75,6 +105,12 @@ type ContactAttributes = {
   landing_origins?: ContactLandingOrigin[]
   whatsapp_opted_in?: boolean
   whatsapp_opt_in_source?: string
+  whatsapp_opt_in_at?: string | null
+  whatsapp_opted_out?: boolean
+  whatsapp_opt_out_at?: string | null
+  email_opted_out?: boolean
+  email_opt_out_source?: EmailOptOutSource | null
+  email_opt_out_at?: string | null
 }
 
 export interface ContactListFilters {
@@ -82,6 +118,7 @@ export interface ContactListFilters {
   kind?: ContactKind
   owner_id?: string
   segment?: ContactSegment
+  whatsapp_consent?: ContactWhatsappConsent
   page?: number
   items?: number
 }
@@ -123,6 +160,7 @@ export function mapContactResource(resource: JsonApiResource): ContactSummary {
           : undefined,
     canEdit: attrs.can_edit === true,
     sourceLabel: attrs.source_label?.trim() || undefined,
+    origins: mapContactOrigins((attrs as Record<string, unknown>).origins),
     lastContactedAt: attrs.last_contacted_at,
     customFields:
       attrs.custom_fields != null && typeof attrs.custom_fields === 'object'
@@ -140,6 +178,12 @@ export function mapContactResource(resource: JsonApiResource): ContactSummary {
       : undefined,
     whatsappOptedIn: attrs.whatsapp_opted_in === true,
     whatsappOptInSource: attrs.whatsapp_opt_in_source?.trim() || undefined,
+    whatsappOptInAt: attrs.whatsapp_opt_in_at ?? undefined,
+    whatsappOptedOut: attrs.whatsapp_opted_out === true,
+    whatsappOptOutAt: attrs.whatsapp_opt_out_at ?? undefined,
+    emailOptedOut: attrs.email_opted_out === true,
+    emailOptOutSource: attrs.email_opt_out_source ?? undefined,
+    emailOptOutAt: attrs.email_opt_out_at ?? undefined,
   }
 }
 
@@ -148,6 +192,7 @@ export function buildContactListParams(filters: ContactListFilters): Record<stri
   if (filters.kind) params.kind = filters.kind
   if (filters.owner_id) params.owner_id = filters.owner_id
   if (filters.segment) params.segment = filters.segment
+  if (filters.whatsapp_consent) params.whatsapp_consent = filters.whatsapp_consent
   if (filters.q && filters.q.length >= 2) params.q = filters.q
   if (filters.page) params.page = filters.page
   if (filters.items) params.items = filters.items
@@ -182,6 +227,28 @@ export async function fetchContactsList(filters: ContactListFilters): Promise<Co
     pageSize,
     totalPages: pagination?.pages ?? 1,
   }
+}
+
+/**
+ * Trae todos los contactos que matchean un filtro, paginando por debajo
+ * (hasta MAX_PER_PAGE=200 del backend por página). Uso: acciones masivas
+ * como "marcar opt-in a todos" que no pueden depender de la selección
+ * manual página por página.
+ */
+export async function fetchAllContacts(
+  filters: Omit<ContactListFilters, 'page' | 'items'>,
+): Promise<ContactSummary[]> {
+  const items = 200
+  const all: ContactSummary[] = []
+  let page = 1
+  // Tope de seguridad: 50 páginas * 200 = 10.000 contactos.
+  for (let i = 0; i < 50; i++) {
+    const result = await fetchContactsList({ ...filters, page, items })
+    all.push(...result.contacts)
+    if (page >= result.totalPages || result.contacts.length === 0) break
+    page += 1
+  }
+  return all
 }
 
 export async function fetchContactDetail(id: string): Promise<ContactSummary> {
@@ -246,9 +313,44 @@ export async function bulkDeleteContacts(ids: string[]): Promise<{ deleted: numb
   return (response.data as { data: { deleted: number } }).data
 }
 
-export async function bulkMarkWhatsappOptIn(ids: string[]): Promise<{ marked: number }> {
+/** `skippedOptedOut`: contactos que dijeron "No" — el backend no los reactiva. */
+export async function bulkMarkWhatsappOptIn(ids: string[]): Promise<{ marked: number; skippedOptedOut: number }> {
   const response = await api.post('/contacts/bulk_whatsapp_opt_in', { ids })
+  const data = (response.data as { data: { marked: number; skipped_opted_out?: number } }).data
+  return { marked: data.marked, skippedOptedOut: Number(data.skipped_opted_out ?? 0) }
+}
+
+/** Registra que el contacto NO autoriza WhatsApp (queda fuera de toda campaña). */
+export async function bulkMarkWhatsappOptOut(ids: string[]): Promise<{ marked: number }> {
+  const response = await api.post('/contacts/bulk_whatsapp_opt_out', { ids })
   return (response.data as { data: { marked: number } }).data
+}
+
+/**
+ * Baja manual de correos de campañas (`optedOut: true`) o deshacerla. Solo se
+ * deshacen las bajas manuales: el backend omite (`skipped`) las del enlace,
+ * rebotes y quejas.
+ */
+export async function bulkSetEmailOptOut(
+  ids: string[],
+  optedOut: boolean,
+): Promise<{ marked: number; skipped: number }> {
+  const response = await api.post(optedOut ? '/contacts/bulk_email_opt_out' : '/contacts/bulk_email_opt_in', { ids })
+  const data = (response.data as { data: { marked: number; skipped?: number } }).data
+  return { marked: data.marked, skipped: Number(data.skipped ?? 0) }
+}
+
+export interface ContactOriginOption {
+  label: string
+  kind: string | null
+  count: number
+}
+
+/** Orígenes de los contactos (p. ej. «Excel: base.xlsx») con su cantidad — filtro de campañas. */
+export async function fetchContactOriginOptions(): Promise<ContactOriginOption[]> {
+  const response = await api.get('/contacts/origin_options')
+  const rows = (response.data as { data?: { label: string; kind?: string | null; count: number }[] }).data ?? []
+  return rows.map((r) => ({ label: String(r.label), kind: r.kind ?? null, count: Number(r.count ?? 0) }))
 }
 
 export async function assignContactOwner(contactId: string, ownerUserId: string): Promise<void> {

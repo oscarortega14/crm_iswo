@@ -9,6 +9,7 @@ class WhatsappTemplatePolicy < ApplicationPolicy
   def create?  = manager_or_admin?
   def update?  = manager_or_admin?
   def destroy? = admin?
+  def sync?    = manager_or_admin?
 
   class Scope < ApplicationPolicy::Scope
     def resolve = scope.all

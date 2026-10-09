@@ -10,7 +10,6 @@
 # Tipos soportados (kind):
 #   "meta" (alias meta_ads) → Ads::MetaLeadProcessor
 #   "google" (alias google_ads) → Ads::GoogleLeadProcessor
-#   "whatsapp_twilio" → procesa inbound de Twilio (integración provider twilio)
 #   "whatsapp_cloud"  → procesa inbound de Meta Cloud API
 #
 # Persiste el payload en AuditEvent al inicio para tener trazabilidad ISO.
@@ -45,7 +44,6 @@ class WebhookProcessorJob < ApplicationJob
     case kind
     when "meta", "meta_ads"    then Ads::MetaLeadProcessor.new(payload).call
     when "google", "google_ads" then Ads::GoogleLeadProcessor.new(payload).call
-    when "whatsapp_twilio"     then process_whatsapp_twilio(payload)
     when "whatsapp_cloud"      then process_whatsapp_cloud(payload)
     when "whatsapp_openwa"     then process_whatsapp_openwa(payload)
     else
@@ -69,68 +67,6 @@ class WebhookProcessorJob < ApplicationJob
       ip_address:  payload["remote_ip"],
       user_agent:  payload["user_agent"]
     )
-  end
-
-  # --- WhatsApp inbound (Twilio) -----------------------------------------
-
-  def process_whatsapp_twilio(payload)
-    payload = stringify_webhook_payload(payload)
-    sid = payload["MessageSid"].presence || payload["SmsSid"].presence
-    msg_status = payload["MessageStatus"].presence || payload["SmsStatus"]
-    inbound = twilio_inbound_payload?(payload)
-
-    # Callback sólo estado (saliente típico: queued → sent → delivered / failed).
-    if sid.present? && msg_status.present? && !inbound
-      record = ActsAsTenant.without_tenant do
-        WhatsappMessage.unscoped.find_by(provider: "twilio", provider_message_id: sid)
-      end
-      if record
-        ActsAsTenant.with_tenant(record.tenant) do
-          apply_twilio_delivery_status(record, msg_status.to_s, payload)
-        end
-      else
-        Rails.logger.info(
-          "[WhatsApp Twilio] status webhook sin mensaje conocido sid=#{sid} status=#{msg_status}"
-        )
-      end
-      return
-    end
-
-    return unless inbound
-
-    to_number   = payload["To"].to_s.sub(/\Awhatsapp:/, "")
-    from_number = payload["From"].to_s.sub(/\Awhatsapp:/, "")
-    integration = find_twilio_integration_for_to(to_number)
-    tenant      = integration.respond_to?(:tenant) ? integration.tenant : integration
-    return Rails.logger.warn(
-      "[WhatsApp Twilio] no tenant para to=#{mask_phone_for_log(to_number)} " \
-      "(account_identifier en Integraciones debe ser ese E.164, p.ej. +14155238886)"
-    ) unless tenant
-
-    ActsAsTenant.with_tenant(tenant) do
-      if sid.present? && tenant.whatsapp_messages.exists?(provider: "twilio", provider_message_id: sid)
-        Rails.logger.info("[WhatsApp Twilio] duplicado MessageSid=#{sid}")
-        return
-      end
-
-      contact     = upsert_contact(tenant, from_number)
-      opportunity = find_opportunity_for_inbound(tenant, contact, from_number)
-      msg = tenant.whatsapp_messages.create!(
-        contact:             contact,
-        opportunity:         opportunity,
-        direction:           "in",
-        provider:            "twilio",
-        provider_message_id: sid || payload["MessageSid"],
-        from_number:         from_number,
-        to_number:           to_number,
-        body:                payload["Body"],
-        media_url:           payload["MediaUrl0"],
-        status:              "delivered",
-        raw_payload:         payload
-      )
-      opportunity&.touch_activity!
-      Notifications::WhatsappMessageNotifier.call(message: msg)
-    end
   end
 
   # --- WhatsApp inbound (Cloud API) --------------------------------------
@@ -280,50 +216,9 @@ class WebhookProcessorJob < ApplicationJob
     Rails.logger.warn("[WhatsApp OpenWA] no se pudo actualizar estado: #{e.message}")
   end
 
-  # Enmascara un número en logs (ISO A.8.11) — conserva los últimos 4 dígitos,
-  # suficiente para depurar mismatches de configuración sin loguear el E.164 completo.
-  def mask_phone_for_log(number)
-    digits = number.to_s
-    return "(vacío)" if digits.blank?
-
-    "#{'*' * [ digits.length - 4, 0 ].max}#{digits.last(4)}"
-  end
-
   def resolve_tenant_by_setting(path, value)
     ActsAsTenant.without_tenant do
       Tenant.where("settings #>> ? = ?", "{#{path.split('.').join(',')}}", value.to_s).first
-    end
-  end
-
-  # Empareja To del webhook con account_identifier (acepta con/sin +).
-  def find_twilio_integration_for_to(to_number)
-    exact = to_number.to_s.strip
-    return nil if exact.blank?
-
-    ActsAsTenant.without_tenant do
-      integ = AdIntegration.unscoped.where(provider: "twilio").find_by(account_identifier: exact)
-      next integ if integ
-
-      digits = exact.gsub(/\D/, "")
-      if digits.present?
-        # Compara dígitos en SQL en vez de cargar toda la tabla a Ruby por webhook.
-        integ = AdIntegration.unscoped.where(provider: "twilio")
-                             .where("regexp_replace(account_identifier, '\\D', '', 'g') = ?", digits)
-                             .first
-        next integ if integ
-      end
-
-      resolve_tenant_by_setting("whatsapp.number", exact) ||
-        (digits.present? ? resolve_tenant_by_whatsapp_number_digits(digits) : nil)
-    end
-  end
-
-  def resolve_tenant_by_whatsapp_number_digits(digits)
-    ActsAsTenant.without_tenant do
-      # Compara dígitos en SQL en vez de cargar todos los tenants a Ruby por webhook.
-      Tenant.where(
-        "regexp_replace(settings #>> '{whatsapp,number}', '\\D', '', 'g') = ?", digits
-      ).first
     end
   end
 
@@ -357,8 +252,21 @@ class WebhookProcessorJob < ApplicationJob
     e164 = parsed.e164
     raise ArgumentError, "teléfono WhatsApp inválido" if e164.blank?
 
-    contact = tenant.contacts.find_by(phone_e164: e164)
-    return contact if contact
+    contact = tenant.contacts.kept.find_by(phone_e164: e164)
+    if contact
+      contact.record_origin!("whatsapp", "inbound") # p. ej. un contacto importado que escribió
+      return contact
+    end
+
+    # Volvió a escribir alguien cuyo contacto se había eliminado: se restaura
+    # (conserva su historial). Antes el mensaje quedaba colgado del contacto
+    # eliminado y la bandeja no podía responderle («Couldn't find Contact»).
+    deleted = tenant.contacts.discarded.order(discarded_at: :desc).find_by(phone_e164: e164)
+    if deleted
+      deleted.undiscard
+      deleted.record_origin!("whatsapp", "inbound")
+      return deleted
+    end
 
     first_name, last_part = split_whatsapp_profile_name(profile_name)
     last_name = last_part.presence || parsed.sanitized.to_s.last(4).presence || "wa"
@@ -423,43 +331,6 @@ class WebhookProcessorJob < ApplicationJob
 
     # Meta suele mandar `id` de media, no URL; sólo persistimos si viene enlace explícito.
     inner["link"].presence
-  end
-
-  def stringify_webhook_payload(payload)
-    h = payload.respond_to?(:to_unsafe_h) ? payload.to_unsafe_h : payload.to_h
-    h.stringify_keys
-  end
-
-  def twilio_inbound_payload?(payload)
-    payload["Body"].present? ||
-      payload["MediaUrl0"].present? ||
-      payload["NumMedia"].to_i.positive?
-  end
-
-  def apply_twilio_delivery_status(msg, twilio_raw_status, payload)
-    key = twilio_raw_status.to_s.downcase
-    mapped = WhatsApp::Adapters::Twilio::STATUS_MAP[key] || msg.status
-
-    attrs = { status: mapped }
-    attrs[:sent_at] = Time.current if mapped.to_s == "sent" && msg.sent_at.blank?
-    attrs[:delivered_at] = Time.current if mapped.to_s == "delivered" && msg.delivered_at.blank?
-    attrs[:read_at] = Time.current if mapped.to_s == "read" && msg.read_at.blank?
-
-    if %w[failed undelivered].include?(key) || payload["ErrorCode"].present?
-      attrs[:error_message] = twilio_status_callback_error(payload, key).presence ||
-                              "Twilio (#{twilio_raw_status})"
-    end
-
-    msg.update!(attrs)
-  rescue ActiveRecord::RecordInvalid => e
-    Rails.logger.warn("[WhatsApp Twilio] no se pudo actualizar estado: #{e.message}")
-  end
-
-  def twilio_status_callback_error(payload, twilio_raw_status)
-    parts = []
-    parts << payload["ErrorMessage"].presence || payload.fetch("SmsStatus", nil)
-    parts << "(código #{payload['ErrorCode']})" if payload["ErrorCode"].present?
-    parts.compact.join(" ").presence || twilio_raw_status.to_s
   end
 
   def apply_whatsapp_cloud_status_callback(st)

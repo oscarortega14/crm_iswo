@@ -5,11 +5,11 @@ require "rails_helper"
 RSpec.describe "Api::V1::WhatsappMessages (oportunidad)", type: :request do
   let(:tenant) { ActsAsTenant.current_tenant }
   let(:admin) { create(:user, :admin, tenant: tenant) }
-  let!(:twilio_integration) do
-    create(:ad_integration, :twilio,
+  let!(:cloud_integration) do
+    create(:ad_integration, :cloud,
            tenant:             tenant,
            account_identifier: "+5731999999999",
-           credentials:      { "account_sid" => "ACxxxxxxxx", "auth_token" => "secret" })
+           credentials:      { "access_token" => "fake-access-token" })
   end
   let(:contact) { create(:contact, tenant: tenant) }
   let(:opportunity) { create(:opportunity, tenant: tenant, contact: contact, owner_user: admin) }
@@ -18,18 +18,16 @@ RSpec.describe "Api::V1::WhatsappMessages (oportunidad)", type: :request do
   # con la selección del adapter. Lo limpiamos para estos tests.
   around do |example|
     old_provider = ENV.delete("WHATSAPP_PROVIDER")
-    old_number   = ENV.delete("TWILIO_WHATSAPP_NUMBER")
     example.run
   ensure
-    ENV["WHATSAPP_PROVIDER"]      = old_provider if old_provider
-    ENV["TWILIO_WHATSAPP_NUMBER"] = old_number   if old_number
+    ENV["WHATSAPP_PROVIDER"] = old_provider if old_provider
   end
 
   describe "POST /api/v1/opportunities/:opportunity_id/whatsapp_messages" do
-    it "usa el número de la integración Twilio como remitente y acepta el mensaje" do
-      # El controller llama WhatsappDeliveryJob.perform_now (inline).
-      # Lo stubamos para evitar la conexión HTTP real a Twilio bloqueada por WebMock.
-      allow(WhatsappDeliveryJob).to receive(:perform_now)
+    it "usa el número de la integración WhatsApp Cloud como remitente y acepta el mensaje" do
+      # El controller encola WhatsappDeliveryJob.perform_later (async).
+      # Lo stubamos para evitar la conexión HTTP real a Meta bloqueada por WebMock.
+      allow(WhatsappDeliveryJob).to receive(:perform_later)
 
       post "/api/v1/opportunities/#{opportunity.id}/whatsapp_messages",
            params:  { to_number: contact.phone_e164, body: "Hola prueba" }.to_json,
@@ -42,7 +40,7 @@ RSpec.describe "Api::V1::WhatsappMessages (oportunidad)", type: :request do
     end
 
     it "responde 422 con código si no hay número ni integración" do
-      twilio_integration.destroy!
+      cloud_integration.destroy!
 
       post "/api/v1/opportunities/#{opportunity.id}/whatsapp_messages",
            params:  { to_number: contact.phone_e164, body: "Hola" }.to_json,
@@ -53,7 +51,7 @@ RSpec.describe "Api::V1::WhatsappMessages (oportunidad)", type: :request do
     end
 
     it "con whatsapp_template_id envía plantilla en vez de texto libre" do
-      allow(WhatsappDeliveryJob).to receive(:perform_now)
+      allow(WhatsappDeliveryJob).to receive(:perform_later)
       template = create(:whatsapp_template, tenant: tenant, meta_template_name: "primer_contacto", language: "es_CO",
                                              variable_labels: ["Nombre"])
 

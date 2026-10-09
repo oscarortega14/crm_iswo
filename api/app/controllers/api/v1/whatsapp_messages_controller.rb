@@ -35,8 +35,7 @@ module Api
       # DELETE /api/v1/opportunities/:opportunity_id/whatsapp_messages
       def destroy_all
         authorize @opportunity, :update?
-        count = @opportunity.whatsapp_messages.count
-        @opportunity.whatsapp_messages.destroy_all
+        count = WhatsApp::ConversationEraser.call(@opportunity.whatsapp_messages)
         log_whatsapp_audit!("whatsapp_messages_cleared", metadata: { count: count })
         head :no_content
       end
@@ -62,8 +61,7 @@ module Api
           render json: {
             error:   "whatsapp_not_configured",
             message: "Configura el envío saliente en Ajustes → Integraciones: " \
-                     "WhatsApp Cloud API (Phone number ID + access token), " \
-                     "Twilio (Account SID + Auth Token + número E.164) " \
+                     "WhatsApp Cloud API (Phone number ID + access token) " \
                      "u OpenWA (URL + API Key + Session ID)."
           }, status: :unprocessable_entity
         when :invalid

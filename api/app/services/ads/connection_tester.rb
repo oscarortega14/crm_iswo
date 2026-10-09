@@ -8,7 +8,6 @@ module Ads
   # Hace un request mínimo (listar cuentas o `me`) al API de cada proveedor:
   #   - meta_ads:  GET graph.facebook.com/v18.0/me?access_token=…
   #   - google_ads: requiere refresh_token válido → POST oauth2/token (refresh)
-  #   - twilio:      GET /2010-04-01/Accounts/{Sid}.json
   #   - whatsapp_cloud: GET graph.facebook.com/{v}/me?access_token=… (detecta OAuth 190)
   #
   # `test` devuelve Result con mensaje seguro para UI (sin secretos).
@@ -36,7 +35,6 @@ module Ads
       case @integration.provider
       when "meta"            then test_meta
       when "google"          then test_google
-      when "twilio"          then test_twilio
       when "whatsapp_cloud"
         test_whatsapp_cloud
       when "openwa"
@@ -72,49 +70,6 @@ module Ads
         detail = res.body.is_a?(Hash) ? res.body.dig("error", "message") : res.body.to_s
         Rails.logger.warn("ConnectionTester meta: #{res.status} #{detail}")
         fail_result("Meta rechazó el token (Graph API). Renueva el access token en la app de Meta.")
-      end
-    end
-
-    # GET /2010-04-01/Accounts/{Sid}.json — misma autenticación que envío de mensajes.
-    def test_twilio
-      creds = @creds.stringify_keys
-      sid   = scrub(creds["account_sid"])
-      tok   = scrub(creds["auth_token"])
-      return fail_result("Faltan account_sid o auth_token en las credenciales de Twilio.") if sid.blank? || tok.blank?
-
-      unless sid.start_with?("AC")
-        return fail_result(
-          "Twilio: el Account SID debe empezar por «AC» (Consola Twilio → Account). " \
-          "No uses el API Key SID (empieza por «SK») en el campo Account SID. " \
-          "Origen de credenciales: #{twilio_integration_origin_label}."
-        )
-      end
-
-      conn = Faraday.new(url: "https://api.twilio.com") do |f|
-        f.request  :url_encoded
-        f.response :json, content_type: /\bjson$/
-        f.options.timeout      = TIMEOUT_SECONDS
-        f.options.open_timeout = TIMEOUT_SECONDS
-      end
-
-      path = "/2010-04-01/Accounts/#{sid}.json"
-      res  = conn.get(path) do |req|
-        req.headers["Authorization"] =
-          "Basic #{Base64.strict_encode64("#{sid}:#{tok}")}"
-      end
-
-      if res.success?
-        Result.new(ok: true, message: nil)
-      else
-        msg = res.body.is_a?(Hash) ? res.body["message"] : res.body.to_s
-        Rails.logger.warn("ConnectionTester twilio: #{res.status} #{msg}")
-        hint =
-          if res.status == 401
-            "Credenciales Twilio incorrectas o token revocado; revisa SID y Auth Token en la consola Twilio."
-          else
-            "Twilio respondió con error (#{res.status}). Comprueba SID y Auth Token."
-          end
-        fail_result(hint)
       end
     end
 
@@ -168,10 +123,6 @@ module Ads
         Rails.logger.warn("ConnectionTester whatsapp_cloud: #{res.status} #{detail}")
         fail_result(hint)
       end
-    end
-
-    def twilio_integration_origin_label
-      "integración Twilio en CRM (id #{@integration.id})"
     end
 
     def test_google

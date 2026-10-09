@@ -1,12 +1,12 @@
 /**
  * URLs públicas de landing pages — alineadas con RFC (subdominio + slug).
  *
- * Producción: https://{tenant}.crm.iswo.com.co/{slug}
+ * Producción: https://{tenant}.iswocrm.com/{slug}
  * Dev:        http://{tenant}.localhost:{port}/{slug}
  * Fallback:   /l/{slug}?tenant={tenant} (localhost plano sin subdominio)
  */
 
-const RESERVED_HOST_LABELS = new Set(['www', 'app', 'api', 'admin', 'crm'])
+const RESERVED_HOST_LABELS = new Set(['www', 'app', 'api', 'admin'])
 
 /** Tenant inferido solo del hostname (no localStorage). */
 export function getTenantFromHostname(): string {
@@ -41,7 +41,7 @@ export function buildLandingPublicUrl(tenantSlug: string, landingSlug: string): 
   }
 
   if (import.meta.env.PROD) {
-    return `https://${tenantSlug}.crm.iswo.com.co/${landingSlug}`
+    return `https://${tenantSlug}.iswocrm.com/${landingSlug}`
   }
 
   return `http://${tenantSlug}.localhost:${landingDevPort()}/${landingSlug}`

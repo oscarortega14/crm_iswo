@@ -70,4 +70,14 @@ RSpec.describe Notifications::WhatsappMessageNotifier do
 
     expect { notify(contact: contact) }.to change(Notification, :count).by(1)
   end
+
+  it "un «Sí» se avisa como autorización, aunque haya otro aviso sin leer del mismo contacto" do
+    contact = create(:contact, tenant: tenant, owner_user: consultant, first_name: "María", last_name: "Andrade")
+    notify(contact: contact)
+
+    msg = create(:whatsapp_message, tenant: tenant, contact: contact, direction: "in", body: "Sí")
+    expect { described_class.call(message: msg) }.to change(Notification, :count).by(1)
+    expect(Notification.last).to have_attributes(title: "María Andrade autorizó WhatsApp",
+                                                 body: /esperando respuesta/)
+  end
 end
